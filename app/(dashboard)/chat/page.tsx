@@ -13,10 +13,8 @@ import {
   AlertCircle,
   RefreshCw,
   RotateCcw,
-  Key,
+  Square,
   ChevronDown,
-  Info,
-  Cpu,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -39,6 +37,89 @@ interface Message {
   content: string;
   createdAt: string;
 }
+
+// Memoized single message bubble to prevent re-rendering entire conversation on each stream chunk
+const ChatMessageBubble = React.memo(function ChatMessageBubble({
+  message,
+  isLastAssistant,
+  isLoading,
+  copiedId,
+  onCopy,
+  onRegenerate,
+}: {
+  message: Message;
+  isLastAssistant: boolean;
+  isLoading: boolean;
+  copiedId: string | null;
+  onCopy: (id: string, text: string) => void;
+  onRegenerate: () => void;
+}) {
+  const isUser = message.role === 'user';
+
+  return (
+    <div className={`flex gap-3.5 ${isUser ? 'justify-end' : 'justify-start'}`}>
+      {!isUser && (
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-600 text-white shadow-sm shadow-blue-500/20">
+          <Bot className="h-4 w-4" />
+        </div>
+      )}
+
+      <div
+        className={`group relative max-w-3xl rounded-2xl p-4 text-sm leading-relaxed ${
+          isUser
+            ? 'bg-blue-600 text-white shadow-md shadow-blue-600/15'
+            : 'border border-slate-800 bg-slate-950/80 text-slate-200'
+        }`}
+      >
+        {isUser ? (
+          <div className="whitespace-pre-wrap">{message.content}</div>
+        ) : (
+          <MarkdownRenderer content={message.content} />
+        )}
+
+        {/* Actions Bar for Assistant Responses */}
+        {!isUser && message.content && (
+          <div className="mt-3 pt-2 flex items-center gap-2 border-t border-slate-800/60 text-xs">
+            <button
+              onClick={() => onCopy(message.id, message.content)}
+              aria-label="Copy assistant answer"
+              className="flex items-center gap-1 rounded px-2 py-1 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+            >
+              {copiedId === message.id ? (
+                <>
+                  <Check className="h-3.5 w-3.5 text-emerald-400" />
+                  <span className="text-emerald-400 text-[11px]">Copied</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="h-3.5 w-3.5" />
+                  <span className="text-[11px]">Copy response</span>
+                </>
+              )}
+            </button>
+
+            {isLastAssistant && !isLoading && (
+              <button
+                onClick={onRegenerate}
+                aria-label="Regenerate response"
+                className="flex items-center gap-1 rounded px-2 py-1 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                <span className="text-[11px]">Regenerate</span>
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {isUser && (
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-700 text-slate-200">
+          <User className="h-4 w-4" />
+        </div>
+      )}
+    </div>
+  );
+});
 
 export default function ChatAssistantPage() {
   const [messages, setMessages] = useState<Message[]>([
@@ -66,6 +147,7 @@ export default function ChatAssistantPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const userScrolledUpRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Check initial server AI configuration status
   useEffect(() => {
@@ -81,6 +163,15 @@ export default function ChatAssistantPage() {
       }
     };
     checkStatus();
+  }, []);
+
+  // Cleanup in-flight requests on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, []);
 
   // Load chat conversations from Supabase or LocalStorage
@@ -126,23 +217,40 @@ export default function ChatAssistantPage() {
     userScrolledUpRef.current = distanceFromBottom > 120;
   };
 
-  const scrollToBottom = () => {
-    if (!userScrolledUpRef.current) {
+  // Instant scroll during streaming prevents Chrome compositor smooth scroll queuing & freeze
+  const scrollToBottom = useCallback((instant = false) => {
+    if (userScrolledUpRef.current) return;
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    if (instant) {
+      container.scrollTop = container.scrollHeight;
+    } else {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  };
+  }, []);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, isLoading]);
+    // While actively streaming, use instant scroll to eliminate layout thrashing
+    scrollToBottom(isLoading);
+  }, [messages, isLoading, scrollToBottom]);
 
-  const handleCopy = (id: string, text: string) => {
+  const handleCopy = useCallback((id: string, text: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
-  };
+  }, []);
+
+  const handleStopGeneration = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsLoading(false);
+  }, []);
 
   const startNewConversation = () => {
+    handleStopGeneration();
     setActiveConversationId(null);
     setLastFailedPrompt(null);
     setMessages([
@@ -158,6 +266,7 @@ export default function ChatAssistantPage() {
   };
 
   const selectConversation = async (convId: string) => {
+    handleStopGeneration();
     setActiveConversationId(convId);
     setLastFailedPrompt(null);
     setConfigError(null);
@@ -228,6 +337,13 @@ export default function ChatAssistantPage() {
 
   const sendMessage = async (textToSend: string, isRegenerate = false) => {
     if (!textToSend.trim() || isLoading) return;
+
+    // Abort any prior in-flight request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
 
     setConfigError(null);
     setLastFailedPrompt(null);
@@ -311,6 +427,7 @@ export default function ChatAssistantPage() {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
         body: JSON.stringify({
           messages: newMessages
             .filter((m) => m.id !== 'welcome')
@@ -332,6 +449,23 @@ export default function ChatAssistantPage() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let streamedContent = '';
+      let lastFlushTime = 0;
+      let scheduledFlush: ReturnType<typeof setTimeout> | null = null;
+
+      // Throttled flush helper to prevent React from re-rendering hundreds of times per second
+      const flushUpdate = (isFinal = false) => {
+        const contentSnapshot = streamedContent;
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === assistantId ? { ...msg, content: contentSnapshot } : msg
+          )
+        );
+        lastFlushTime = Date.now();
+        if (isFinal && scheduledFlush) {
+          clearTimeout(scheduledFlush);
+          scheduledFlush = null;
+        }
+      };
 
       while (true) {
         const { done, value } = await reader.read();
@@ -339,12 +473,20 @@ export default function ChatAssistantPage() {
         const chunk = decoder.decode(value, { stream: true });
         streamedContent += chunk;
 
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === assistantId ? { ...msg, content: streamedContent } : msg
-          )
-        );
+        const now = Date.now();
+        // Flush at most every 40ms (~25fps throttled updates)
+        if (now - lastFlushTime >= 40) {
+          flushUpdate();
+        } else if (!scheduledFlush) {
+          scheduledFlush = setTimeout(() => {
+            scheduledFlush = null;
+            flushUpdate();
+          }, 40);
+        }
       }
+
+      // Guarantee final state flush
+      flushUpdate(true);
 
       if (convId && !isSupabaseConfigured()) {
         const updatedList: LocalMessage[] = [
@@ -355,21 +497,28 @@ export default function ChatAssistantPage() {
       }
     } catch (err: unknown) {
       const error = err as Error;
+      if (error.name === 'AbortError' || abortController.signal.aborted) {
+        console.log('Chat generation cancelled by user.');
+        return;
+      }
       console.error('Chat error:', error);
       setConfigError(error.message);
       setLastFailedPrompt(textToSend);
       setMessages((prev) => prev.filter((msg) => msg.id !== assistantId || msg.content.length > 0));
     } finally {
       setIsLoading(false);
+      abortControllerRef.current = null;
+      // Final smooth scroll upon completion
+      setTimeout(() => scrollToBottom(false), 50);
     }
   };
 
-  const handleRegenerate = () => {
+  const handleRegenerate = useCallback(() => {
     const lastUser = [...messages].reverse().find((m) => m.role === 'user');
     if (lastUser) {
       sendMessage(lastUser.content, true);
     }
-  };
+  }, [messages]);
 
   const promptStarters = [
     'Draft a Q4 enterprise expansion strategy',
@@ -426,7 +575,7 @@ export default function ChatAssistantPage() {
 
         {/* Model Selector */}
         <div className="pt-3 border-t border-slate-800">
-          <label className="block text-[11px] font-medium text-slate-400 mb-1.5 flex items-center justify-between">
+          <label className="text-[11px] font-medium text-slate-400 mb-1.5 flex items-center justify-between">
             <span>Inference Model</span>
             <span className="text-[10px] text-emerald-400 font-normal">Active</span>
           </label>
@@ -515,90 +664,42 @@ export default function ChatAssistantPage() {
           onScroll={handleScroll}
           className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5"
         >
-          {messages.map((message, index) => {
-            const isUser = message.role === 'user';
-            const isLastAssistant = !isUser && index === messages.length - 1;
-
-            return (
-              <div
-                key={message.id}
-                className={`flex gap-3.5 ${isUser ? 'justify-end' : 'justify-start'}`}
-              >
-                {!isUser && (
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-600 text-white shadow-sm shadow-blue-500/20">
-                    <Bot className="h-4 w-4" />
-                  </div>
-                )}
-
-                <div
-                  className={`group relative max-w-3xl rounded-2xl p-4 text-sm leading-relaxed ${
-                    isUser
-                      ? 'bg-blue-600 text-white shadow-md shadow-blue-600/15'
-                      : 'border border-slate-800 bg-slate-950/80 text-slate-200'
-                  }`}
-                >
-                  {isUser ? (
-                    <div className="whitespace-pre-wrap">{message.content}</div>
-                  ) : (
-                    <MarkdownRenderer content={message.content} />
-                  )}
-
-                  {/* Actions Bar for Assistant Responses */}
-                  {!isUser && message.content && (
-                    <div className="mt-3 pt-2 flex items-center gap-2 border-t border-slate-800/60 text-xs">
-                      <button
-                        onClick={() => handleCopy(message.id, message.content)}
-                        aria-label="Copy assistant answer"
-                        className="flex items-center gap-1 rounded px-2 py-1 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
-                      >
-                        {copiedId === message.id ? (
-                          <>
-                            <Check className="h-3.5 w-3.5 text-emerald-400" />
-                            <span className="text-emerald-400 text-[11px]">Copied</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="h-3.5 w-3.5" />
-                            <span className="text-[11px]">Copy response</span>
-                          </>
-                        )}
-                      </button>
-
-                      {isLastAssistant && !isLoading && (
-                        <button
-                          onClick={handleRegenerate}
-                          aria-label="Regenerate response"
-                          className="flex items-center gap-1 rounded px-2 py-1 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
-                        >
-                          <RefreshCw className="h-3.5 w-3.5" />
-                          <span className="text-[11px]">Regenerate</span>
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {isUser && (
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-700 text-slate-200">
-                    <User className="h-4 w-4" />
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          {messages.map((message, index) => (
+            <ChatMessageBubble
+              key={message.id}
+              message={message}
+              isLastAssistant={message.role === 'assistant' && index === messages.length - 1}
+              isLoading={isLoading}
+              copiedId={copiedId}
+              onCopy={handleCopy}
+              onRegenerate={handleRegenerate}
+            />
+          ))}
 
           {/* Streaming loading skeleton */}
           {isLoading && (
-            <div className="flex gap-3.5 items-center text-slate-400 text-xs pl-1">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-600/30 text-blue-400 animate-pulse">
-                <Sparkles className="h-4 w-4 animate-spin" />
+            <div className="flex gap-3.5 items-center justify-between text-slate-400 text-xs pl-1 py-1">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-600/30 text-blue-400 animate-pulse">
+                  <Sparkles className="h-4 w-4 animate-spin" />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-bounce" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-bounce [animation-delay:0.2s]" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-bounce [animation-delay:0.4s]" />
+                  <span className="ml-2 font-medium text-slate-300">Synthesizing executive response...</span>
+                </div>
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-bounce" />
-                <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-bounce [animation-delay:0.2s]" />
-                <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-bounce [animation-delay:0.4s]" />
-                <span className="ml-2 font-medium">Synthesizing executive response...</span>
-              </div>
+
+              {/* Instant Abort / Cancel Button */}
+              <button
+                type="button"
+                onClick={handleStopGeneration}
+                className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/90 px-3 py-1.5 text-xs font-medium text-slate-300 hover:border-red-500/50 hover:bg-red-950/30 hover:text-red-300 transition-colors shadow-sm"
+              >
+                <Square className="h-3 w-3 fill-current text-red-400" />
+                <span>Stop Generating</span>
+              </button>
             </div>
           )}
 
@@ -614,11 +715,12 @@ export default function ChatAssistantPage() {
                 <button
                   key={i}
                   type="button"
+                  disabled={isLoading}
                   onClick={() => {
                     setInput(starter);
                     textareaRef.current?.focus();
                   }}
-                  className="rounded-full border border-slate-800 bg-slate-900/90 px-3 py-1 text-xs text-slate-300 hover:border-blue-500/40 hover:text-white transition-colors"
+                  className="rounded-full border border-slate-800 bg-slate-900/90 px-3 py-1 text-xs text-slate-300 hover:border-blue-500/40 hover:text-white transition-colors disabled:opacity-50"
                 >
                   {starter}
                 </button>
@@ -655,16 +757,29 @@ export default function ChatAssistantPage() {
               className="flex-1 max-h-36 min-h-[44px] resize-none rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
 
-            <Button
-              type="submit"
-              size="md"
-              variant="primary"
-              disabled={isLoading || !input.trim()}
-              aria-label="Send message"
-              className="h-11 px-4 shrink-0"
-            >
-              <Send className="h-4 w-4" />
-            </Button>
+            {isLoading ? (
+              <Button
+                type="button"
+                size="md"
+                variant="outline"
+                onClick={handleStopGeneration}
+                aria-label="Stop generation"
+                className="h-11 px-4 shrink-0 border-red-500/40 text-red-400 hover:bg-red-950/30"
+              >
+                <Square className="h-4 w-4 fill-current" />
+              </Button>
+            ) : (
+              <Button
+                type="submit"
+                size="md"
+                variant="primary"
+                disabled={!input.trim()}
+                aria-label="Send message"
+                className="h-11 px-4 shrink-0"
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            )}
           </div>
         </form>
       </div>

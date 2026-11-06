@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Copy, Check } from 'lucide-react';
 
 interface MarkdownRendererProps {
@@ -8,18 +8,21 @@ interface MarkdownRendererProps {
   className?: string;
 }
 
-export function MarkdownRenderer({ content, className = '' }: MarkdownRendererProps) {
-  // Parse blocks: code fences, tables, headings, lists, paragraphs
-  const blocks = parseMarkdownBlocks(content);
+export const MarkdownRenderer = React.memo(function MarkdownRenderer({
+  content,
+  className = '',
+}: MarkdownRendererProps) {
+  // Parse blocks: code fences, tables, headings, lists, paragraphs (memoized per content)
+  const blocks = useMemo(() => parseMarkdownBlocks(content), [content]);
 
   return (
     <div className={`space-y-3 leading-relaxed text-slate-200 ${className}`}>
       {blocks.map((block, i) => (
-        <BlockItem key={i} block={block} />
+        <BlockItem key={`${block.type}-${i}`} block={block} />
       ))}
     </div>
   );
-}
+});
 
 type Block =
   | { type: 'code'; language: string; code: string }
@@ -30,11 +33,14 @@ type Block =
   | { type: 'paragraph'; text: string };
 
 function parseMarkdownBlocks(content: string): Block[] {
+  if (!content) return [];
+
   const lines = content.split('\n');
   const blocks: Block[] = [];
   let i = 0;
 
   while (i < lines.length) {
+    const startI = i;
     const line = lines[i];
 
     // 1. Code Fence
@@ -52,18 +58,20 @@ function parseMarkdownBlocks(content: string): Block[] {
         language,
         code: codeLines.join('\n'),
       });
-      i++; // skip ending fence
+      if (i < lines.length && lines[i].trim().startsWith('```')) {
+        i++; // skip ending fence
+      }
       continue;
     }
 
-    // 2. Headings
-    if (line.startsWith('#')) {
-      const match = line.match(/^(#{1,6})\s+(.*)$/);
+    // 2. Headings (# to ###### followed by optional whitespace or text)
+    if (line.match(/^#{1,6}(\s+.*)?$/)) {
+      const match = line.match(/^(#{1,6})\s*(.*)$/);
       if (match) {
         blocks.push({
           type: 'heading',
           level: match[1].length,
-          text: match[2],
+          text: match[2] || '',
         });
         i++;
         continue;
@@ -106,6 +114,13 @@ function parseMarkdownBlocks(content: string): Block[] {
           rows,
         });
         continue;
+      } else {
+        // Lone pipe line during streaming: treat as paragraph line
+        blocks.push({
+          type: 'paragraph',
+          text: tableLines.join('\n'),
+        });
+        continue;
       }
     }
 
@@ -132,18 +147,19 @@ function parseMarkdownBlocks(content: string): Block[] {
       continue;
     }
 
-    // 6. Paragraph or empty line
+    // 6. Empty line
     if (line.trim().length === 0) {
       i++;
       continue;
     }
 
+    // 7. Regular paragraph
     const paraLines: string[] = [];
     while (
       i < lines.length &&
       lines[i].trim().length > 0 &&
       !lines[i].trim().startsWith('```') &&
-      !lines[i].startsWith('#') &&
+      !lines[i].match(/^#{1,6}(\s+.*)?$/) &&
       !lines[i].startsWith('>') &&
       !lines[i].trim().startsWith('|') &&
       !lines[i].match(/^(\*|-)\s+/) &&
@@ -159,19 +175,32 @@ function parseMarkdownBlocks(content: string): Block[] {
         text: paraLines.join('\n'),
       });
     }
+
+    // Absolute forward progress guarantee: prevent infinite loops on malformed/streaming inputs
+    if (i === startI) {
+      blocks.push({
+        type: 'paragraph',
+        text: lines[i],
+      });
+      i++;
+    }
   }
 
   return blocks;
 }
 
-function BlockItem({ block }: { block: Block }) {
+const BlockItem = React.memo(function BlockItem({ block }: { block: Block }) {
   switch (block.type) {
     case 'code':
       return <CodeBlock language={block.language} code={block.code} />;
 
     case 'heading': {
       if (block.level === 1) {
-        return <h1 className="text-xl font-bold text-white mt-3 pb-1 border-b border-slate-800">{formatInline(block.text)}</h1>;
+        return (
+          <h1 className="text-xl font-bold text-white mt-3 pb-1 border-b border-slate-800">
+            {formatInline(block.text)}
+          </h1>
+        );
       }
       if (block.level === 2) {
         return <h2 className="text-lg font-bold text-white mt-3 pb-1">{formatInline(block.text)}</h2>;
@@ -233,7 +262,7 @@ function BlockItem({ block }: { block: Block }) {
     default:
       return null;
   }
-}
+});
 
 function CodeBlock({ language, code }: { language: string; code: string }) {
   const [copied, setCopied] = useState(false);
@@ -277,8 +306,9 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
 
 // Inline formatting: **bold**, *italics*, `code`
 function formatInline(text: string): React.ReactNode {
+  if (!text) return null;
+
   const parts: React.ReactNode[] = [];
-  // Tokenize `code`, **bold**, *italic*
   const regex = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -319,5 +349,5 @@ function formatInline(text: string): React.ReactNode {
     parts.push(text.slice(lastIndex));
   }
 
-  return parts;
+  return parts.length > 0 ? parts : text;
 }

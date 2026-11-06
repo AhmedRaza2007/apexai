@@ -135,6 +135,10 @@ export async function POST(req: NextRequest) {
           async start(controller) {
             try {
               for await (const chunk of responseStream) {
+                if (req.signal.aborted) {
+                  controller.close();
+                  return;
+                }
                 const content = chunk.choices[0]?.delta?.content || '';
                 if (content) {
                   completeAssistantResponse += content;
@@ -157,6 +161,10 @@ export async function POST(req: NextRequest) {
 
               controller.close();
             } catch (streamError) {
+              if (req.signal.aborted) {
+                try { controller.close(); } catch {}
+                return;
+              }
               console.error('Streaming chunk error:', streamError);
               controller.error(streamError);
             }
@@ -179,32 +187,57 @@ export async function POST(req: NextRequest) {
     // 5. Native Autonomous Trained Model Inference (Zero-cost, 100% offline-ready)
     const nativeOutput = await runNativeInference(sanitizedMessages, targetModel);
 
-    // Stream native output in realistic word chunks for authentic streaming UX
+    // Group text into natural token chunks (2-4 words per chunk) for smooth, non-blocking delivery
+    const rawTokens = nativeOutput.split(/(\s+)/);
+    const chunks: string[] = [];
+    let currentChunk = '';
+
+    for (let i = 0; i < rawTokens.length; i++) {
+      currentChunk += rawTokens[i];
+      // Flush every 2 words or on newlines
+      if (rawTokens[i].includes('\n') || i % 4 === 3 || i === rawTokens.length - 1) {
+        chunks.push(currentChunk);
+        currentChunk = '';
+      }
+    }
+    if (currentChunk) chunks.push(currentChunk);
+
     const readable = new ReadableStream({
       async start(controller) {
-        const words = nativeOutput.split(/(\s+)/);
-        for (let i = 0; i < words.length; i++) {
-          controller.enqueue(encoder.encode(words[i]));
-          // Brief micro-delay every 3 tokens for natural streaming sensation
-          if (i % 4 === 0) {
-            await new Promise((resolve) => setTimeout(resolve, 15));
-          }
-        }
+        try {
+          for (let i = 0; i < chunks.length; i++) {
+            if (req.signal.aborted) {
+              controller.close();
+              return;
+            }
 
-        if (userId && supabaseClient && conversationId && nativeOutput) {
-          try {
-            await supabaseClient.from('messages').insert({
-              conversation_id: conversationId,
-              user_id: userId,
-              role: 'assistant',
-              content: nativeOutput,
-            });
-          } catch (err) {
-            console.warn('Failed to persist assistant message:', err);
-          }
-        }
+            controller.enqueue(encoder.encode(chunks[i]));
 
-        controller.close();
+            // Smooth 20ms cadence between token chunks
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+
+          if (userId && supabaseClient && conversationId && nativeOutput) {
+            try {
+              await supabaseClient.from('messages').insert({
+                conversation_id: conversationId,
+                user_id: userId,
+                role: 'assistant',
+                content: nativeOutput,
+              });
+            } catch (err) {
+              console.warn('Failed to persist assistant message:', err);
+            }
+          }
+
+          controller.close();
+        } catch (streamErr) {
+          if (req.signal.aborted) {
+            try { controller.close(); } catch {}
+            return;
+          }
+          controller.error(streamErr);
+        }
       },
     });
 

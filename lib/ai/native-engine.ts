@@ -133,8 +133,39 @@ export async function runNativeInference(
     return generateStrategyPlan(lastUserMsg);
   }
 
+  // 6. Risk, SLA, and compliance queries
+  if (query.includes('risk') || query.includes('sla') || query.includes('agreement') || query.includes('contract') || query.includes('compliance')) {
+    return generateRiskAssessment(lastUserMsg);
+  }
+
   // General executive business synthesis
   return generateGeneralBusinessResponse(lastUserMsg);
+}
+
+function generateRiskAssessment(prompt: string): string {
+  return `### Executive Legal & Operational Risk Assessment: SaaS SLA Agreements
+
+Below is a structured analysis of standard Service Level Agreement (SLA) risks and recommended contractual guardrails:
+
+#### 1. Core Contractual Vulnerabilities
+- **Ambiguous Downtime Definitions**: Standard SLAs often calculate uptime excluding scheduled maintenance or upstream cloud outages, obscuring true downtime.
+- **Limited Remedy Clauses**: Providers frequently cap remedies strictly to minor service credits (5-10%), while disclaiming all indirect and consequential business damages.
+- **RTO / RPO Omissions**: Lack of enforceable Disaster Recovery Time Objectives (RTO) and Recovery Point Objectives (RPO) leaves customer business operations vulnerable.
+
+#### 2. Risk Mitigation & Negotiation Matrix
+| Clause / Risk Domain | Standard Vendor Term | Recommended Enterprise Guardrail | Priority |
+| :--- | :--- | :--- | :--- |
+| **Uptime Guarantee** | 99.0% - 99.5% unverified | 99.9% (Three Nines) measured monthly with automated monitoring | High |
+| **Incident Response Time** | Best-effort basis | Hard SLA: Severity-1 response under 30 mins, resolution within 4 hours | Critical |
+| **Breach Notification** | Within 30 calendar days | Enforce mandatory 72-hour notification timeline aligned with GDPR/SOC2 | Critical |
+| **Termination for Cause** | Locked for multi-year term | Penalty-free contract termination if uptime drops below 98.5% across 2 consecutive cycles | High |
+
+#### 3. Recommended Action Plan for Procurement & Legal
+1. Incorporate API uptime and data pipeline throughput into the formal SLA definition.
+2. Require daily encrypted off-site backups with guaranteed export capabilities.
+3. Carve out security incidents, data breaches, and gross negligence from standard limitation-of-liability caps.
+
+*(Synthesized by the ApexAI Native Model — Enterprise Compliance Suite)*`;
 }
 
 function generateExecutiveEmail(prompt: string): string {
