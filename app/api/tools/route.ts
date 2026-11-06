@@ -1,27 +1,81 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOpenAIClient, getDefaultModel, isAIConfigured } from '@/lib/ai/client';
+import { getOpenAIClient, getDefaultModel, isAIConfigured, formatAIError } from '@/lib/ai/client';
 import { buildToolPrompt, SYSTEM_PROMPTS, ToolType } from '@/lib/ai/prompts';
 import { createClient } from '@/lib/supabase/server';
+import { checkRateLimit, sanitizeText } from '@/lib/security';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+export async function GET() {
+  const configured = isAIConfigured();
+  return NextResponse.json({
+    configured,
+    model: getDefaultModel(),
+    status: configured ? 'ready' : 'configuration_required',
+  });
+}
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    // 1. Rate Limiting Check
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'anonymous-client';
+    const rateLimit = checkRateLimit(`tools-${ip}`, 25, 60000);
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        {
+          error: `Rate limit reached. Please wait ${rateLimit.resetInSec} seconds before generating more business assets.`,
+        },
+        { status: 429 }
+      );
+    }
+
+    // 2. Validate Body
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: 'Invalid JSON request payload.' }, { status: 400 });
+    }
+
     const { toolType, inputData, title, saveToLibrary = false } = body;
 
-    if (!toolType || !inputData) {
+    const validTools: ToolType[] = ['email', 'social', 'product', 'summarize', 'brainstorm'];
+    if (!toolType || !validTools.includes(toolType as ToolType)) {
       return NextResponse.json(
-        { error: 'Missing required fields: toolType and inputData are mandatory.' },
+        { error: `Invalid or missing toolType. Must be one of: ${validTools.join(', ')}` },
         { status: 400 }
       );
     }
 
+    if (!inputData || typeof inputData !== 'object') {
+      return NextResponse.json(
+        { error: 'Missing required inputData object for this tool generator.' },
+        { status: 400 }
+      );
+    }
+
+    // Specific validation for document summarizer input length
+    if (toolType === 'summarize') {
+      const text = inputData.textToSummarize;
+      if (!text || typeof text !== 'string' || text.trim().length === 0) {
+        return NextResponse.json(
+          { error: 'Please provide document text to summarize.' },
+          { status: 400 }
+        );
+      }
+      if (text.length > 50000) {
+        return NextResponse.json(
+          { error: 'Input text exceeds maximum document size (50,000 characters). Please provide a shorter excerpt.' },
+          { status: 400 }
+        );
+      }
+    }
+
+    // 3. AI Provider Configuration Check
     if (!isAIConfigured()) {
       return NextResponse.json(
         {
           error:
-            'AI API Key is not configured. Please add your OPENAI_API_KEY to .env.local to generate content.',
+            'AI API Key is not configured. Please set a valid OPENAI_API_KEY in your .env.local file or server environment variables to generate content.',
           isConfigError: true,
         },
         { status: 503 }
@@ -39,12 +93,12 @@ export async function POST(req: NextRequest) {
         { role: 'user', content: userPrompt },
       ],
       temperature: 0.7,
-      max_tokens: 2048,
+      max_tokens: 2500,
     });
 
     const generatedContent = completion.choices[0]?.message?.content || '';
 
-    // If user requested to save to library and is authenticated
+    // 4. Save to Supabase if authenticated
     let savedRecord = null;
     if (saveToLibrary) {
       try {
@@ -54,11 +108,12 @@ export async function POST(req: NextRequest) {
         } = await supabase.auth.getUser();
 
         if (user) {
+          const cleanTitle = sanitizeText(title || `${toolType.toUpperCase()} Draft`, 120);
           const { data, error } = await supabase
             .from('saved_content')
             .insert({
               user_id: user.id,
-              title: title || `${toolType.toUpperCase()} Draft - ${new Date().toLocaleDateString()}`,
+              title: cleanTitle,
               tool_type: toolType,
               input_params: inputData,
               generated_content: generatedContent,
@@ -72,7 +127,7 @@ export async function POST(req: NextRequest) {
           }
         }
       } catch (saveErr) {
-        console.warn('Error saving to library:', saveErr);
+        console.warn('Error saving to Supabase library:', saveErr);
       }
     }
 
@@ -83,22 +138,8 @@ export async function POST(req: NextRequest) {
       savedRecord,
     });
   } catch (error: unknown) {
-    const err = error as { message?: string; status?: number; code?: string };
-    console.error('Tools API Error:', err);
-
-    let status = 500;
-    let message = 'An unexpected error occurred while generating content.';
-
-    if (err.status === 401 || err.code === 'invalid_api_key') {
-      status = 401;
-      message = 'Invalid OpenAI API key. Please check your credentials in .env.local.';
-    } else if (err.status === 429) {
-      status = 429;
-      message = 'OpenAI rate limit or quota exceeded. Please check your billing or quota.';
-    } else if (err.message) {
-      message = err.message;
-    }
-
-    return NextResponse.json({ error: message }, { status });
+    console.error('Tools API Error:', error);
+    const { status, message, isConfigError } = formatAIError(error);
+    return NextResponse.json({ error: message, isConfigError }, { status });
   }
 }

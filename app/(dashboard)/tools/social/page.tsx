@@ -9,6 +9,8 @@ export default function SocialToolPage() {
     topic: 'How AI business assistants transform team productivity without eliminating jobs',
     tone: 'thought_leadership',
     audience: 'Startup founders, C-level executives, and operations managers',
+    language: 'English',
+    hashtagStyle: 'trending',
     callToAction: 'How is your company integrating AI into daily routines? Drop your thoughts below.',
   };
 
@@ -16,9 +18,9 @@ export default function SocialToolPage() {
     <ToolRunner
       toolType="social"
       title="Social Media Caption Creator"
-      description="Generate viral hooks, thought leadership frameworks, and optimized hashtags."
+      description="Generate viral hooks, thought leadership frameworks, and platform-optimized copy."
       badge="Multi-Platform"
-      defaultTitle="AI Productivity LinkedIn Post"
+      defaultTitle="AI Productivity Post"
       initialFormData={initialData}
       renderForm={(formData, setFormData) => (
         <>
@@ -30,8 +32,8 @@ export default function SocialToolPage() {
                 onChange={(e) => setFormData((prev) => ({ ...prev, platform: e.target.value }))}
                 className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
               >
-                <option value="linkedin">LinkedIn Post</option>
-                <option value="twitter">Twitter / X Thread or Post</option>
+                <option value="linkedin">LinkedIn (Executive / B2B)</option>
+                <option value="twitter">Twitter / X (Thread or Post)</option>
                 <option value="instagram">Instagram Caption</option>
                 <option value="facebook">Facebook Business Update</option>
               </select>
@@ -48,6 +50,36 @@ export default function SocialToolPage() {
                 <option value="engaging">Conversational & Engaging</option>
                 <option value="promotional">Product Launch / Promotional</option>
                 <option value="storytelling">Vulnerable Storytelling</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-300 mb-1.5">Language</label>
+              <select
+                value={(formData.language as string) || 'English'}
+                onChange={(e) => setFormData((prev) => ({ ...prev, language: e.target.value }))}
+                className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
+              >
+                <option value="English">English</option>
+                <option value="Spanish">Spanish</option>
+                <option value="French">French</option>
+                <option value="German">German</option>
+                <option value="Portuguese">Portuguese</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-300 mb-1.5">Hashtags</label>
+              <select
+                value={(formData.hashtagStyle as string) || 'trending'}
+                onChange={(e) => setFormData((prev) => ({ ...prev, hashtagStyle: e.target.value }))}
+                className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
+              >
+                <option value="trending">Trending & Algorithm-Targeted (5-7)</option>
+                <option value="minimal">Minimalist (2-3)</option>
+                <option value="none">No Hashtags</option>
               </select>
             </div>
           </div>
@@ -86,7 +118,7 @@ export default function SocialToolPage() {
               type="text"
               value={(formData.callToAction as string) || ''}
               onChange={(e) => setFormData((prev) => ({ ...prev, callToAction: e.target.value }))}
-              placeholder="e.g. Link in comments to register for the webinar"
+              placeholder="e.g. Link in comments to register for the live demo"
               className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
             />
           </div>

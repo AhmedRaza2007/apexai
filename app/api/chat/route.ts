@@ -1,13 +1,42 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOpenAIClient, getDefaultModel, isAIConfigured } from '@/lib/ai/client';
+import { getOpenAIClient, getDefaultModel, isAIConfigured, sanitizeModel, formatAIError } from '@/lib/ai/client';
 import { SYSTEM_PROMPTS } from '@/lib/ai/prompts';
 import { createClient } from '@/lib/supabase/server';
+import { checkRateLimit, sanitizeText } from '@/lib/security';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+export async function GET() {
+  const configured = isAIConfigured();
+  return NextResponse.json({
+    configured,
+    model: getDefaultModel(),
+    status: configured ? 'ready' : 'configuration_required',
+  });
+}
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, conversationId, model = getDefaultModel() } = await req.json();
+    // 1. Rate Limiting Check
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'anonymous-client';
+    const rateLimit = checkRateLimit(`chat-${ip}`, 30, 60000);
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        {
+          error: `Too many chat requests. Please wait ${rateLimit.resetInSec} seconds before sending another message.`,
+        },
+        { status: 429 }
+      );
+    }
+
+    // 2. Payload Validation
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: 'Invalid request: Request body must be valid JSON.' }, { status: 400 });
+    }
+
+    const { messages, conversationId, model } = body;
 
     if (!Array.isArray(messages) || messages.length === 0) {
       return NextResponse.json(
@@ -16,6 +45,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Guard against excessive message history size
+    if (messages.length > 50) {
+      return NextResponse.json(
+        { error: 'Message history exceeds the maximum supported length (50 messages).' },
+        { status: 400 }
+      );
+    }
+
+    // 3. Configuration Check
     if (!isAIConfigured()) {
       return NextResponse.json(
         {
@@ -27,9 +65,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const targetModel = sanitizeModel(model);
     const openai = getOpenAIClient();
 
-    // Verify session for optional persistence
+    // 4. Verify User Session for optional DB persistence
     let userId: string | null = null;
     let supabaseClient: Awaited<ReturnType<typeof createClient>> | null = null;
     try {
@@ -41,11 +80,30 @@ export async function POST(req: NextRequest) {
         userId = user.id;
       }
     } catch {
-      // Supabase is optional in local guest/preview mode
+      // In guest mode or when Supabase is not configured
     }
 
-    // Save user message to database if conversationId and user are available
-    const lastUserMessage = messages[messages.length - 1];
+    // Sanitize user messages
+    const sanitizedMessages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> = [];
+    let totalCharCount = 0;
+
+    for (const msg of messages) {
+      if (!msg || typeof msg !== 'object' || typeof msg.content !== 'string') continue;
+      const role = msg.role === 'user' || msg.role === 'assistant' || msg.role === 'system' ? msg.role : 'user';
+      const cleanContent = sanitizeText(msg.content, 12000);
+      totalCharCount += cleanContent.length;
+      sanitizedMessages.push({ role, content: cleanContent });
+    }
+
+    if (totalCharCount > 60000) {
+      return NextResponse.json(
+        { error: 'Conversation content exceeds maximum token payload safety limits. Please start a new session.' },
+        { status: 400 }
+      );
+    }
+
+    // Save latest user message to database if conversationId is valid and user is signed in
+    const lastUserMessage = sanitizedMessages[sanitizedMessages.length - 1];
     if (userId && supabaseClient && conversationId && lastUserMessage?.role === 'user') {
       try {
         await supabaseClient.from('messages').insert({
@@ -59,21 +117,19 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Prepare messages payload with system prompt
+    // 5. Construct API Payload
     const apiMessages = [
       { role: 'system' as const, content: SYSTEM_PROMPTS.chat },
-      ...messages.map((m: { role: 'user' | 'assistant' | 'system'; content: string }) => ({
-        role: m.role,
-        content: m.content,
-      })),
+      ...sanitizedMessages,
     ];
 
-    // Create stream
+    // 6. Initiate Stream
     const responseStream = await openai.chat.completions.create({
-      model,
+      model: targetModel,
       messages: apiMessages,
       stream: true,
       temperature: 0.7,
+      max_tokens: 3000,
     });
 
     const encoder = new TextEncoder();
@@ -90,7 +146,7 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          // Persist complete assistant message once streaming finishes
+          // Persist completed assistant response in Supabase if authenticated
           if (userId && supabaseClient && conversationId && completeAssistantResponse) {
             try {
               await supabaseClient.from('messages').insert({
@@ -106,6 +162,7 @@ export async function POST(req: NextRequest) {
 
           controller.close();
         } catch (streamError) {
+          console.error('Streaming chunk error:', streamError);
           controller.error(streamError);
         }
       },
@@ -119,22 +176,8 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error: unknown) {
-    const err = error as { message?: string; status?: number; code?: string };
-    console.error('Chat API Error:', err);
-
-    let status = 500;
-    let message = 'An unexpected error occurred while communicating with the AI service.';
-
-    if (err.status === 401 || err.code === 'invalid_api_key') {
-      status = 401;
-      message = 'Invalid OpenAI API key. Please check your credentials in .env.local.';
-    } else if (err.status === 429) {
-      status = 429;
-      message = 'OpenAI rate limit or quota exceeded. Please check your billing or quota.';
-    } else if (err.message) {
-      message = err.message;
-    }
-
-    return NextResponse.json({ error: message }, { status });
+    console.error('Chat API Error:', error);
+    const { status, message, isConfigError } = formatAIError(error);
+    return NextResponse.json({ error: message, isConfigError }, { status });
   }
 }

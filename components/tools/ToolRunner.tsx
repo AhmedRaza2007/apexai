@@ -1,21 +1,24 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Sparkles,
   Copy,
   Check,
   Bookmark,
-  Share2,
+  RefreshCw,
   AlertCircle,
   Loader2,
   CheckCircle2,
+  Info,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { MarkdownRenderer } from '@/components/ui/MarkdownRenderer';
 import { ToolType } from '@/lib/ai/prompts';
 import { isSupabaseConfigured } from '@/lib/supabase/client';
+import { saveLocalContentItem } from '@/lib/storage';
 
 interface ToolRunnerProps {
   toolType: ToolType;
@@ -28,6 +31,7 @@ interface ToolRunnerProps {
     setFormData: React.Dispatch<React.SetStateAction<Record<string, unknown>>>
   ) => React.ReactNode;
   initialFormData: Record<string, unknown>;
+  safetyNotice?: string;
 }
 
 export function ToolRunner({
@@ -38,6 +42,7 @@ export function ToolRunner({
   defaultTitle,
   renderForm,
   initialFormData,
+  safetyNotice,
 }: ToolRunnerProps) {
   const [formData, setFormData] = useState<Record<string, unknown>>(initialFormData);
   const [outputTitle, setOutputTitle] = useState(defaultTitle);
@@ -47,9 +52,30 @@ export function ToolRunner({
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [copied, setCopied] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isAIConfigured, setIsAIConfigured] = useState<boolean | null>(null);
 
-  const handleGenerate = async (e: React.FormEvent) => {
-    e.preventDefault();
+  useEffect(() => {
+    const checkAI = async () => {
+      try {
+        const res = await fetch('/api/ai/status');
+        if (res.ok) {
+          const data = await res.json();
+          setIsAIConfigured(Boolean(data.ai?.configured));
+          if (!data.ai?.configured) {
+            setErrorMessage(
+              'OPENAI_API_KEY is not configured on the server. Set your key in .env.local to generate live deliverables.'
+            );
+          }
+        }
+      } catch (e) {
+        console.warn('Status check failed:', e);
+      }
+    };
+    checkAI();
+  }, []);
+
+  const handleGenerate = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     setIsGenerating(true);
     setErrorMessage(null);
     setSavedSuccess(false);
@@ -61,7 +87,7 @@ export function ToolRunner({
         body: JSON.stringify({
           toolType,
           inputData: formData,
-          title: outputTitle,
+          title: outputTitle.trim() || defaultTitle,
           saveToLibrary: false,
         }),
       });
@@ -86,21 +112,34 @@ export function ToolRunner({
     setIsSaving(true);
     setErrorMessage(null);
 
-    try {
-      const response = await fetch('/api/tools', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          toolType,
-          inputData: formData,
-          title: outputTitle || `${toolType} output`,
-          saveToLibrary: true,
-        }),
-      });
+    const docTitle = outputTitle.trim() || `${toolType.toUpperCase()} Draft`;
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to save to content library.');
+    try {
+      if (isSupabaseConfigured()) {
+        const response = await fetch('/api/tools', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            toolType,
+            inputData: formData,
+            title: docTitle,
+            saveToLibrary: true,
+          }),
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || 'Failed to save to database library.');
+        }
+      } else {
+        // Guest mode: save to LocalStorage so Library page renders it immediately
+        saveLocalContentItem({
+          title: docTitle,
+          tool_type: toolType,
+          input_params: formData,
+          generated_content: generatedOutput,
+          tags: [toolType, 'ai-generated'],
+        });
       }
 
       setSavedSuccess(true);
@@ -133,16 +172,27 @@ export function ToolRunner({
         </div>
       </div>
 
+      {/* Safety Notice (if provided) */}
+      {safetyNotice && (
+        <div className="flex items-start gap-2.5 rounded-xl border border-blue-500/20 bg-blue-950/20 p-3 text-xs text-blue-300">
+          <Info className="h-4 w-4 shrink-0 text-blue-400 mt-0.5" />
+          <span>{safetyNotice}</span>
+        </div>
+      )}
+
       {/* Error Banner */}
       {errorMessage && (
-        <div className="flex items-start gap-3 rounded-xl border border-red-800/60 bg-red-950/40 p-4 text-xs text-red-200">
-          <AlertCircle className="h-5 w-5 shrink-0 text-red-400 mt-0.5" />
-          <div>
-            <p className="font-semibold text-red-300">Generation Error</p>
-            <p className="mt-1 leading-relaxed text-red-200/90">{errorMessage}</p>
-            <p className="mt-2 text-slate-400">
-              Ensure <code className="text-amber-300">OPENAI_API_KEY</code> is correctly set in your environment.
-            </p>
+        <div className="flex items-start gap-3 rounded-xl border border-amber-600/40 bg-amber-950/40 p-4 text-xs text-amber-200">
+          <AlertCircle className="h-5 w-5 shrink-0 text-amber-400 mt-0.5" />
+          <div className="space-y-1.5 flex-1">
+            <p className="font-semibold text-amber-300">Generation Notice</p>
+            <p className="leading-relaxed text-amber-200/90">{errorMessage}</p>
+            <div className="mt-2 flex items-center gap-2">
+              <code className="rounded bg-black/40 px-2 py-0.5 font-mono text-[11px] text-amber-300">
+                OPENAI_API_KEY=your_key_here
+              </code>
+              <span className="text-slate-400 text-[11px]">in .env.local</span>
+            </div>
           </div>
         </div>
       )}
@@ -157,7 +207,7 @@ export function ToolRunner({
               <CardDescription>Configure the requirements for this generation</CardDescription>
             </CardHeader>
             <CardContent>
-              <form onSubmit={handleGenerate} className="space-y-4">
+              <form onSubmit={(e) => handleGenerate(e)} className="space-y-4">
                 <div>
                   <label className="block text-xs font-medium text-slate-300 mb-1.5">
                     Deliverable Name / Title
@@ -200,6 +250,16 @@ export function ToolRunner({
               {generatedOutput && (
                 <div className="flex items-center gap-2">
                   <Button
+                    onClick={() => handleGenerate()}
+                    variant="outline"
+                    size="sm"
+                    isLoading={isGenerating}
+                    leftIcon={<RefreshCw className="h-3.5 w-3.5" />}
+                  >
+                    Regenerate
+                  </Button>
+
+                  <Button
                     onClick={handleCopy}
                     variant="outline"
                     size="sm"
@@ -227,7 +287,7 @@ export function ToolRunner({
                       )
                     }
                   >
-                    {savedSuccess ? 'Saved to Library' : 'Save'}
+                    {savedSuccess ? 'Saved' : 'Save'}
                   </Button>
                 </div>
               )}
@@ -235,7 +295,7 @@ export function ToolRunner({
 
             <CardContent className="flex-1 p-5">
               {isGenerating ? (
-                <div className="flex h-64 flex-col items-center justify-center space-y-3 text-slate-400">
+                <div className="flex h-72 flex-col items-center justify-center space-y-3 text-slate-400">
                   <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
                   <p className="text-sm font-medium text-slate-300">Crafting executive copy...</p>
                   <p className="text-xs text-slate-500">
@@ -244,24 +304,24 @@ export function ToolRunner({
                 </div>
               ) : generatedOutput ? (
                 <div className="space-y-4">
-                  <div className="rounded-xl border border-slate-800 bg-slate-950 p-5 text-sm text-slate-200 leading-relaxed whitespace-pre-wrap selection:bg-blue-600/30">
-                    {generatedOutput}
+                  <div className="rounded-xl border border-slate-800 bg-slate-950 p-5 text-sm text-slate-200 leading-relaxed selection:bg-blue-600/30">
+                    <MarkdownRenderer content={generatedOutput} />
                   </div>
 
-                  <div className="flex items-center justify-between text-xs text-slate-500 pt-2">
+                  <div className="flex items-center justify-between text-xs text-slate-500 pt-2 border-t border-slate-800/60">
                     <span>
                       Words: {generatedOutput.split(/\s+/).filter(Boolean).length} | Characters:{' '}
                       {generatedOutput.length}
                     </span>
-                    <span>Ready for business deployment</span>
+                    <span className="text-blue-400 font-medium">Ready for business deployment</span>
                   </div>
                 </div>
               ) : (
-                <div className="flex h-64 flex-col items-center justify-center rounded-xl border border-dashed border-slate-800/80 p-8 text-center text-slate-500">
+                <div className="flex h-72 flex-col items-center justify-center rounded-xl border border-dashed border-slate-800/80 p-8 text-center text-slate-500">
                   <Sparkles className="h-8 w-8 text-slate-600 mb-2" />
                   <p className="text-sm font-medium text-slate-400">No output generated yet</p>
                   <p className="mt-1 text-xs text-slate-500">
-                    Fill in the parameters on the left and click &quot;Generate with AI&quot;.
+                    Configure your parameters on the left and click &quot;Generate with AI&quot;.
                   </p>
                 </div>
               )}

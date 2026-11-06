@@ -13,21 +13,20 @@ import {
   FileText,
   Lightbulb,
   ArrowRight,
-  TrendingUp,
-  Key,
   Database,
-  CheckCircle,
+  HardDrive,
 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
+import { getLocalSavedContent, getLocalConversations } from '@/lib/storage';
 
 export default function DashboardOverviewPage() {
   const [stats, setStats] = useState({
     conversationsCount: 0,
     savedContentCount: 0,
-    automationsCount: 2, // Default built-in template tasks
+    automationsCount: 3,
   });
   const [recentSaved, setRecentSaved] = useState<Array<{ id: string; title: string; tool_type: string; created_at: string }>>([]);
   const [dbConfigured, setDbConfigured] = useState(false);
@@ -36,8 +35,8 @@ export default function DashboardOverviewPage() {
     const isDb = isSupabaseConfigured();
     setDbConfigured(isDb);
 
-    if (isDb) {
-      const loadStats = async () => {
+    const loadMetrics = async () => {
+      if (isDb) {
         try {
           const supabase = createClient();
           const {
@@ -47,26 +46,53 @@ export default function DashboardOverviewPage() {
           if (user) {
             const [convRes, contentRes] = await Promise.all([
               supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('user_id', user.id),
-              supabase.from('saved_content').select('id, title, tool_type, created_at').eq('user_id', user.id).order('created_at', { ascending: false }).limit(4),
+              supabase
+                .from('saved_content')
+                .select('id, title, tool_type, created_at')
+                .eq('user_id', user.id)
+                .order('created_at', { ascending: false })
+                .limit(4),
             ]);
 
-            setStats((prev) => ({
-              ...prev,
+            setStats({
               conversationsCount: convRes.count || 0,
               savedContentCount: contentRes.data?.length || 0,
-            }));
+              automationsCount: 3,
+            });
 
-            if (contentRes.data) {
+            if (contentRes.data && contentRes.data.length > 0) {
               setRecentSaved(contentRes.data);
+              return;
             }
           }
         } catch (e) {
-          console.warn('Could not load user stats:', e);
+          console.warn('Could not load user stats from Supabase:', e);
         }
-      };
+      }
 
-      loadStats();
-    }
+      // Guest / LocalStorage Metrics
+      const localSaved = getLocalSavedContent();
+      const localConvs = getLocalConversations();
+
+      setStats({
+        conversationsCount: localConvs.length,
+        savedContentCount: localSaved.length,
+        automationsCount: 3,
+      });
+
+      if (localSaved.length > 0) {
+        setRecentSaved(
+          localSaved.slice(0, 4).map((item) => ({
+            id: item.id,
+            title: item.title,
+            tool_type: item.tool_type,
+            created_at: item.created_at,
+          }))
+        );
+      }
+    };
+
+    loadMetrics();
   }, []);
 
   const businessTools = [
@@ -144,13 +170,15 @@ export default function DashboardOverviewPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-white">{stats.conversationsCount}</div>
-            <p className="mt-1 text-xs text-slate-500">Persistent chat threads</p>
+            <p className="mt-1 text-xs text-slate-500">
+              {dbConfigured ? 'PostgreSQL threads' : 'Local threads stored'}
+            </p>
           </CardContent>
         </Card>
 
         <Card className="border-slate-800/80 bg-slate-900/40">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-slate-400">Saved Tool Outputs</CardTitle>
+            <CardTitle className="text-sm font-medium text-slate-400">Saved Deliverables</CardTitle>
             <Bookmark className="h-4 w-4 text-emerald-400" />
           </CardHeader>
           <CardContent>
@@ -161,25 +189,31 @@ export default function DashboardOverviewPage() {
 
         <Card className="border-slate-800/80 bg-slate-900/40">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-slate-400">Automations</CardTitle>
+            <CardTitle className="text-sm font-medium text-slate-400">Active Workflows</CardTitle>
             <Zap className="h-4 w-4 text-amber-400" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-white">{stats.automationsCount} Active</div>
+            <div className="text-2xl font-bold text-white">{stats.automationsCount} Configured</div>
             <p className="mt-1 text-xs text-slate-500">Human approval gated</p>
           </CardContent>
         </Card>
 
         <Card className="border-slate-800/80 bg-slate-900/40">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-slate-400">Database & Security</CardTitle>
-            <Database className="h-4 w-4 text-indigo-400" />
+            <CardTitle className="text-sm font-medium text-slate-400">Security Mode</CardTitle>
+            {dbConfigured ? (
+              <Database className="h-4 w-4 text-emerald-400" />
+            ) : (
+              <HardDrive className="h-4 w-4 text-blue-400" />
+            )}
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-white">
               {dbConfigured ? 'Supabase RLS' : 'Guest Mode'}
             </div>
-            <p className="mt-1 text-xs text-slate-500">Multi-tenant isolation</p>
+            <p className="mt-1 text-xs text-slate-500">
+              {dbConfigured ? 'Multi-tenant PostgreSQL' : 'Local client isolation'}
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -202,24 +236,22 @@ export default function DashboardOverviewPage() {
             return (
               <Link key={tool.href} href={tool.href} className="group block">
                 <Card className="h-full border-slate-800 bg-slate-900/60 transition-all duration-200 hover:border-blue-500/40 hover:bg-slate-900/90 hover:shadow-lg hover:shadow-blue-500/5">
-                  <CardHeader className="pb-3">
-                    <div className="flex items-center justify-between">
+                  <div className="p-6">
+                    <div className="flex items-center justify-between pb-3">
                       <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600/15 text-blue-400 border border-blue-500/20 group-hover:bg-blue-600 group-hover:text-white transition-all">
                         <Icon className="h-5 w-5" />
                       </div>
                       <Badge variant="info">{tool.badge}</Badge>
                     </div>
-                    <CardTitle className="mt-4 text-base font-semibold group-hover:text-blue-400 transition-colors">
+                    <h4 className="mt-4 text-base font-semibold text-white group-hover:text-blue-400 transition-colors">
                       {tool.title}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-xs text-slate-400 leading-relaxed">{tool.description}</p>
+                    </h4>
+                    <p className="mt-2 text-xs text-slate-400 leading-relaxed">{tool.description}</p>
                     <div className="mt-4 flex items-center gap-1.5 text-xs font-medium text-blue-400">
                       <span>Launch Generator</span>
                       <ArrowRight className="h-3.5 w-3.5 group-hover:translate-x-1 transition-transform" />
                     </div>
-                  </CardContent>
+                  </div>
                 </Card>
               </Link>
             );
@@ -227,7 +259,7 @@ export default function DashboardOverviewPage() {
         </div>
       </div>
 
-      {/* Bottom Section: Recent Saved Outputs or Empty State */}
+      {/* Bottom Section */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Quick Assistant Launcher */}
         <div className="lg:col-span-1 rounded-2xl border border-slate-800 bg-slate-900/50 p-6 flex flex-col justify-between">
@@ -285,7 +317,7 @@ export default function DashboardOverviewPage() {
                 <Bookmark className="mx-auto h-8 w-8 text-slate-600" />
                 <p className="mt-2 text-sm text-slate-400">No saved documents yet</p>
                 <p className="text-xs text-slate-500">
-                  Generate copy using any AI Business Tool and click &quot;Save to Library&quot;.
+                  Generate copy using any AI Business Tool and click &quot;Save&quot;.
                 </p>
               </div>
             )}

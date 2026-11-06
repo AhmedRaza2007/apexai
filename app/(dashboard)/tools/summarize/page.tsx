@@ -22,16 +22,17 @@ Action items for Q4 include:
     <ToolRunner
       toolType="summarize"
       title="Executive Document & Text Summarizer"
-      description="Extract key takeaways, executive summaries, and action item owners from any briefing or memo."
+      description="Extract key takeaways, executive summaries, and action item ownership matrices from memos or reports."
       badge="Information Synthesis"
       defaultTitle="Q3 Operations Transition Summary"
       initialFormData={initialData}
+      safetyNotice="Pro-tip: For maximum accuracy, ensure input text does not exceed 50,000 characters. ApexAI analyzes key points and structures ownership matrices."
       renderForm={(formData, setFormData) => (
         <>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                Summary Length
+                Summary Depth
               </label>
               <select
                 value={(formData.length as string) || 'concise'}
@@ -46,28 +47,33 @@ Action items for Q4 include:
 
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                Specific Focus
+                Specific Strategic Lens
               </label>
               <input
                 type="text"
                 value={(formData.focusArea as string) || ''}
                 onChange={(e) => setFormData((prev) => ({ ...prev, focusArea: e.target.value }))}
-                placeholder="e.g. Financial impact, Action items"
+                placeholder="e.g. Financial impact, Risk assessment"
                 className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1.5">
-              Source Text or Document Content
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-medium text-slate-300">
+                Source Document Text
+              </label>
+              <span className="text-[11px] text-slate-500">
+                {((formData.textToSummarize as string) || '').length} / 50,000 chars
+              </span>
+            </div>
             <textarea
               rows={8}
               value={(formData.textToSummarize as string) || ''}
               onChange={(e) => setFormData((prev) => ({ ...prev, textToSummarize: e.target.value }))}
               placeholder="Paste memo, report, contract clauses, or transcript here..."
-              className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none resize-none"
+              className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none resize-none font-mono text-xs leading-relaxed"
             />
           </div>
         </>

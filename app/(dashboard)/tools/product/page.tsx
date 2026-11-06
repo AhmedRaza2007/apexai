@@ -6,6 +6,7 @@ import { ToolRunner } from '@/components/tools/ToolRunner';
 export default function ProductToolPage() {
   const initialData = {
     productName: 'ApexAI Enterprise Suite',
+    category: 'Enterprise SaaS / AI Workflow Automation',
     targetAudience: 'Mid-sized e-commerce and professional service firms',
     features:
       'Multi-model AI integration, Supabase Row-Level-Security, automated email drafting, document summarization, team collaboration seats, sub-second latency streaming responses.',
@@ -36,6 +37,19 @@ export default function ProductToolPage() {
             />
           </div>
 
+          <div>
+            <label className="block text-xs font-medium text-slate-300 mb-1.5">
+              Product Category / Industry
+            </label>
+            <input
+              type="text"
+              value={(formData.category as string) || ''}
+              onChange={(e) => setFormData((prev) => ({ ...prev, category: e.target.value }))}
+              placeholder="e.g. Office Ergonomics, SaaS B2B, Consumer Tech"
+              className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
+            />
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1.5">Brand Tone</label>
@@ -58,8 +72,9 @@ export default function ProductToolPage() {
                 onChange={(e) => setFormData((prev) => ({ ...prev, format: e.target.value }))}
                 className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
               >
-                <option value="saas_landing">SaaS Landing Page</option>
-                <option value="ecommerce">E-Commerce Product Page (Shopify/Amazon)</option>
+                <option value="saas_landing">SaaS Landing Page (Hero + Pillars)</option>
+                <option value="ecommerce">E-Commerce Product Page (Shopify)</option>
+                <option value="amazon_listing">Amazon Listing (Title + 5 Bullets)</option>
                 <option value="kickstarter">Crowdfunding / Launch Deck</option>
               </select>
             </div>
@@ -80,7 +95,7 @@ export default function ProductToolPage() {
 
           <div>
             <label className="block text-xs font-medium text-slate-300 mb-1.5">
-              Key Features & Specs
+              Key Features & Specs (Bulleted or Commas)
             </label>
             <textarea
               rows={4}

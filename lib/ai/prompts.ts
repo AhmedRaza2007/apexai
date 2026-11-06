@@ -3,45 +3,62 @@ export const SYSTEM_PROMPTS = {
 Your objectives:
 - Deliver concise, actionable, and executive-ready advice.
 - Assist with market strategy, operations, finance concepts, marketing, communications, and workflows.
-- Format responses cleanly with markdown: bold key takeaways, use bullet points for lists, and concise tables when comparing options.
+- Format responses cleanly with markdown: use headings (##, ###), bold key takeaways, bullet points for lists, and concise tables when comparing options.
+- When generating code, configuration, or technical commands, use fenced code blocks with language identifiers (e.g. \`\`\`sql, \`\`\`json, \`\`\`typescript).
 - Maintain a proactive, strategic, polite, and authoritative business tone.`,
 
   email: `You are an expert executive business communications strategist.
 Your task is to write polished, effective professional emails tailored to the specified objective, audience, and tone.
-Include:
-1. A clear, high-open-rate Subject Line
-2. The complete email body formatted with professional salutation and sign-off
-3. Brief notes on why this phrasing was chosen and follow-up timing advice.`,
+Structure your output into clearly delineated markdown sections:
+### Subject Line Options
+Provide 1 primary subject line and 2 alternatives (e.g. curiosity-based, direct).
+### Email Body
+Include professional salutation, hook, core value/request, and professional sign-off.
+### Strategic Delivery Notes
+Provide concise advice on why this phrasing was chosen, best sending day/time, and recommended follow-up cadence.`,
 
   social: `You are a high-performing digital marketing director and copywriter.
-Generate high-converting, engaging social media posts tailored to the target platform (LinkedIn, Twitter/X, Instagram, etc.).
-Structure the output with:
-- Captivating Hook (first 1-2 lines)
-- Value-packed Core Message
-- Clear Call-to-Action (CTA)
-- Platform-optimized Hashtags and formatting guidelines.`,
+Generate high-converting, platform-optimized social media posts.
+Structure your response cleanly:
+### Hook Options
+Provide 2 captivating opening hooks.
+### Primary Post
+Deliver the complete formatted post with whitespace spacing, bullet highlights, and engaging voice.
+### Call to Action (CTA)
+Clear, conversion-oriented CTA.
+### Recommended Hashtags
+Tailored, relevant hashtags suited to the platform algorithm.`,
 
   product: `You are a senior e-commerce copywriter and product marketing manager.
 Craft compelling product descriptions that transform features into vivid customer benefits and drive conversions.
 Structure the output with:
-- Catchy Headline / Tagline
-- Compelling Narrative Overview
-- Key Benefits & Features (bullet points)
-- Ideal Customer Persona
-- Recommended Call to Action (CTA).`,
+### Catchy Tagline & Headline
+### Narrative Product Overview
+Engaging story hook connecting customer pain point to the solution.
+### Core Value Pillars & Key Benefits (Bullet Points)
+Feature-to-benefit breakdowns.
+### Target Customer Persona
+Who this is explicitly built for.
+### Conversion Call-To-Action (CTA)`,
 
   summarize: `You are an executive chief of staff specializing in information synthesis.
 Analyze the provided document or text and deliver an executive-level briefing containing:
-1. One-sentence Executive Summary
-2. 3 to 5 Key Takeaways & Strategic Insights
-3. Critical Action Items & Owners
-4. Potential Risks or Considerations.`,
+### 1-Sentence Executive Summary
+### Key Takeaways & Strategic Findings (3 to 5 Bullets)
+### Action Items & Ownership Matrix (Table with Item, Priority, Recommended Owner)
+### Potential Risks or Watch-outs`,
 
   brainstorm: `You are a McKinsey-grade business strategist and venture consultant.
 Brainstorm high-impact, innovative business ideas, marketing campaigns, or strategic initiatives for the provided topic.
 Structure the output with:
-- 3 to 5 distinct, high-potential concepts
-- For each concept: Value Proposition, Target Audience, Execution Roadmap, and Revenue/Impact Potential.`,
+### Executive Concept Summary
+### 3 to 5 Distinct Strategic Initiatives
+For each concept, detail:
+- Value Proposition & Differentiation
+- Target Segment / Buyer Persona
+- Step-by-Step Execution Roadmap
+- Estimated Resource Investment & ROI Horizon
+> **Disclaimer**: *These strategic ideas are AI-generated frameworks intended for brainstorming. Prior to capital deployment, validate with primary customer interviews, regulatory compliance checks, and formal financial modeling.*`,
 };
 
 export type ToolType = 'email' | 'social' | 'product' | 'summarize' | 'brainstorm';
@@ -50,8 +67,10 @@ export interface EmailToolInput {
   recipient: string;
   purpose: string;
   tone: 'professional' | 'persuasive' | 'friendly' | 'urgent' | 'apologetic';
+  length?: 'concise' | 'standard' | 'detailed';
   keyPoints: string;
   senderName?: string;
+  subjectContext?: string;
 }
 
 export interface SocialToolInput {
@@ -59,6 +78,8 @@ export interface SocialToolInput {
   topic: string;
   tone: 'thought_leadership' | 'engaging' | 'promotional' | 'storytelling';
   audience: string;
+  language?: string;
+  hashtagStyle?: 'trending' | 'minimal' | 'none';
   callToAction?: string;
 }
 
@@ -67,7 +88,8 @@ export interface ProductToolInput {
   targetAudience: string;
   features: string;
   tone: 'premium' | 'innovative' | 'approachable' | 'bold';
-  format: 'ecommerce' | 'saas_landing' | 'kickstarter';
+  format: 'ecommerce' | 'saas_landing' | 'kickstarter' | 'amazon_listing';
+  category?: string;
 }
 
 export interface SummarizeToolInput {
@@ -81,73 +103,80 @@ export interface BrainstormToolInput {
   industry: string;
   budgetOrScale: 'low_budget_startup' | 'growth_scaleup' | 'enterprise';
   primaryGoal: string;
+  dimension?: 'revenue_models' | 'gtm_channels' | 'product_differentiation' | 'cost_optimization';
 }
 
 export function buildToolPrompt(toolType: ToolType, input: Record<string, unknown>): string {
   switch (toolType) {
     case 'email': {
       const data = input as unknown as EmailToolInput;
-      return `Please draft a professional business email with the following parameters:
-- Recipient: ${data.recipient || 'Business Partner / Client'}
-- Purpose / Objective: ${data.purpose || 'General Business Inquiry'}
-- Tone: ${data.tone || 'professional'}
-- Sender Name: ${data.senderName || '[Your Name]'}
-- Key Points / Context to Include:
-${data.keyPoints || 'Discuss project updates and coordinate next steps.'}
+      return `Please draft a professional business email with the following specifications:
+- Recipient: ${data.recipient || 'Business Partner / Enterprise Client'}
+- Core Objective: ${data.purpose || 'General Business Inquiry'}
+- Desired Tone: ${data.tone || 'professional'}
+- Desired Length: ${data.length || 'standard'}
+- Sender Identity: ${data.senderName || '[Your Name & Title]'}
+${data.subjectContext ? `- Subject Line Preference / Context: ${data.subjectContext}` : ''}
+- Key Points & Specific Context:
+${data.keyPoints || 'Discuss recent business updates and coordinate upcoming milestone next steps.'}
 
-Ensure the output includes a Subject Line, complete email draft, and follow-up recommendation.`;
+Deliver multiple subject line options, the full email draft, and follow-up guidance.`;
     }
 
     case 'social': {
       const data = input as unknown as SocialToolInput;
       return `Generate a high-impact social media post with the following details:
 - Target Platform: ${data.platform || 'linkedin'}
-- Core Topic: ${data.topic || 'Industry insights and leadership'}
+- Core Topic / Lesson: ${data.topic || 'Industry insights and leadership'}
 - Tone: ${data.tone || 'thought_leadership'}
-- Target Audience: ${data.audience || 'Entrepreneurs and business leaders'}
-- Desired Call-to-Action: ${data.callToAction || 'Share your thoughts in the comments'}
+- Target Audience: ${data.audience || 'B2B Founders and business leaders'}
+- Desired Language: ${data.language || 'English'}
+- Hashtag Strategy: ${data.hashtagStyle || 'trending'}
+- Call-to-Action: ${data.callToAction || 'Share your insights in the comments'}
 
-Provide an attention-grabbing hook, the formatted body, and relevant hashtags.`;
+Provide hook options, the formatted body copy with algorithm-friendly spacing, CTA, and hashtags.`;
     }
 
     case 'product': {
       const data = input as unknown as ProductToolInput;
-      return `Write an outstanding product description with the following requirements:
-- Product Name: ${data.productName || 'Premium Product'}
+      return `Write compelling product sales copy with the following requirements:
+- Product Name: ${data.productName || 'Enterprise Product'}
+${data.category ? `- Category: ${data.category}` : ''}
 - Target Audience: ${data.targetAudience || 'Modern professionals and businesses'}
-- Key Features / Specifications:
-${data.features || 'High quality, automated workflows, time-saving capabilities.'}
-- Tone / Brand Voice: ${data.tone || 'premium'}
-- Format: ${data.format || 'ecommerce'}
+- Brand Voice / Tone: ${data.tone || 'premium'}
+- Format: ${data.format || 'saas_landing'}
+- Technical Specifications / Key Features:
+${data.features || 'High speed, automated workflows, bank-grade encryption, time savings.'}
 
-Turn features into benefits and provide a headline, product story, feature list, and conversion CTA.`;
+Translate technical features into emotional and operational benefits. Provide tagline, story, feature bullets, and conversion CTA.`;
     }
 
     case 'summarize': {
       const data = input as unknown as SummarizeToolInput;
-      return `Summarize the following document/content:
-- Format / Detail Level: ${data.length || 'concise'}
-${data.focusArea ? `- Specific Focus: ${data.focusArea}` : ''}
+      return `Summarize the following document content:
+- Summary Format & Depth: ${data.length || 'concise'}
+${data.focusArea ? `- Specific Focus Lens: ${data.focusArea}` : ''}
 
---- Content to Summarize ---
+=== SOURCE CONTENT START ===
 ${data.textToSummarize || 'No content provided.'}
-----------------------------
+=== SOURCE CONTENT END ===
 
-Provide the 1-sentence executive summary, bulleted key takeaways, and action items.`;
+Extract the 1-sentence executive summary, key takeaways, and an actionable ownership table.`;
     }
 
     case 'brainstorm': {
       const data = input as unknown as BrainstormToolInput;
-      return `Brainstorm high-impact strategic ideas for the following challenge:
-- Core Challenge / Objective: ${data.challenge || 'Accelerate business growth'}
-- Industry / Niche: ${data.industry || 'Technology & Business Services'}
-- Scale / Stage: ${data.budgetOrScale || 'growth_scaleup'}
-- Primary Goal: ${data.primaryGoal || 'Acquire high-value customers'}
+      return `Brainstorm strategic growth and business innovation initiatives:
+- Strategic Challenge: ${data.challenge || 'Accelerate business expansion'}
+- Industry / Market Niche: ${data.industry || 'Technology & Professional Services'}
+- Enterprise Scale: ${data.budgetOrScale || 'growth_scaleup'}
+- Primary Success KPI: ${data.primaryGoal || 'Acquire 50 qualified enterprise accounts'}
+${data.dimension ? `- Focus Dimension: ${data.dimension}` : ''}
 
-Provide 3 to 5 structured, actionable concepts with execution steps and value proposition.`;
+Deliver 3 to 5 structured, realistic concepts with execution roadmaps and the standard analytical disclaimer.`;
     }
 
     default:
-      return 'Please analyze the request and provide comprehensive business guidance.';
+      return 'Please analyze the business request and provide executive guidance.';
   }
 }

@@ -13,9 +13,11 @@ export default function DashboardLayout({
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [userEmail, setUserEmail] = useState<string | undefined>(undefined);
   const [isDBConnected, setIsDBConnected] = useState(false);
+  const [isAIConnected, setIsAIConnected] = useState(false);
 
   useEffect(() => {
-    const checkUser = async () => {
+    // 1. Check Supabase DB Status
+    const checkDB = async () => {
       const configured = isSupabaseConfigured();
       setIsDBConnected(configured);
 
@@ -29,12 +31,26 @@ export default function DashboardLayout({
             setUserEmail(user.email);
           }
         } catch {
-          // Ignore error in fallback
+          // Fallback to guest mode
         }
       }
     };
 
-    checkUser();
+    // 2. Query Server AI Configuration Status
+    const checkAI = async () => {
+      try {
+        const res = await fetch('/api/ai/status');
+        if (res.ok) {
+          const data = await res.json();
+          setIsAIConnected(Boolean(data.ai?.configured));
+        }
+      } catch (e) {
+        console.warn('Could not retrieve AI status:', e);
+      }
+    };
+
+    checkDB();
+    checkAI();
   }, []);
 
   return (
@@ -47,11 +63,11 @@ export default function DashboardLayout({
       />
 
       {/* Main Content Area */}
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden min-w-0">
         <Navbar
           onMenuToggle={() => setIsSidebarOpen(!isSidebarOpen)}
           isDBConnected={isDBConnected}
-          isAIConnected={true}
+          isAIConnected={isAIConnected}
         />
         <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-7xl">{children}</div>

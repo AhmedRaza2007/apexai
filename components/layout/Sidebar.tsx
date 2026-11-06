@@ -6,7 +6,6 @@ import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
   MessageSquare,
-  Wrench,
   Mail,
   Share2,
   Package,
@@ -18,9 +17,11 @@ import {
   Sparkles,
   ChevronRight,
   ShieldCheck,
+  User,
+  X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { createClient } from '@/lib/supabase/client';
+import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
 
 interface SidebarProps {
   userEmail?: string;
@@ -34,8 +35,10 @@ export function Sidebar({ userEmail, isOpen = true, onClose }: SidebarProps) {
 
   const handleSignOut = async () => {
     try {
-      const supabase = createClient();
-      await supabase.auth.signOut();
+      if (isSupabaseConfigured()) {
+        const supabase = createClient();
+        await supabase.auth.signOut();
+      }
       router.push('/login');
       router.refresh();
     } catch (e) {
@@ -68,7 +71,8 @@ export function Sidebar({ userEmail, isOpen = true, onClose }: SidebarProps) {
       {isOpen && (
         <div
           onClick={onClose}
-          className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm lg:hidden"
+          aria-hidden="true"
+          className="fixed inset-0 z-40 bg-black/80 backdrop-blur-sm lg:hidden transition-opacity"
         />
       )}
 
@@ -91,6 +95,13 @@ export function Sidebar({ userEmail, isOpen = true, onClose }: SidebarProps) {
               </span>
             </div>
           </Link>
+          <button
+            onClick={onClose}
+            aria-label="Close navigation sidebar"
+            className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white lg:hidden"
+          >
+            <X className="h-5 w-5" />
+          </button>
         </div>
 
         {/* Navigation scrollable area */}
@@ -132,6 +143,7 @@ export function Sidebar({ userEmail, isOpen = true, onClose }: SidebarProps) {
               </span>
               <Link
                 href="/tools"
+                onClick={() => onClose && onClose()}
                 className="text-[11px] font-medium text-blue-400 hover:text-blue-300"
               >
                 All Tools
@@ -164,7 +176,7 @@ export function Sidebar({ userEmail, isOpen = true, onClose }: SidebarProps) {
             </nav>
           </div>
 
-          {/* Management & Safeguards */}
+          {/* Operations & Safeguards */}
           <div>
             <div className="px-3 pb-2 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
               Operations
@@ -207,18 +219,21 @@ export function Sidebar({ userEmail, isOpen = true, onClose }: SidebarProps) {
           <div className="flex items-center justify-between rounded-xl bg-slate-900/80 p-2.5 border border-slate-800">
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-600 text-xs font-semibold text-white">
-                {userEmail ? userEmail.slice(0, 2).toUpperCase() : 'AI'}
+                {userEmail ? userEmail.slice(0, 2).toUpperCase() : <User className="h-4 w-4" />}
               </div>
               <div className="min-w-0">
                 <p className="truncate text-xs font-medium text-white">
-                  {userEmail || 'Business User'}
+                  {userEmail || 'Guest Explorer'}
                 </p>
-                <p className="text-[10px] text-slate-400 truncate">Pro Workspace</p>
+                <p className="text-[10px] text-slate-400 truncate">
+                  {userEmail ? 'Authenticated User' : 'Local Persistence Mode'}
+                </p>
               </div>
             </div>
             <button
               onClick={handleSignOut}
-              title="Sign Out"
+              title={userEmail ? 'Sign Out' : 'Switch Account / Login'}
+              aria-label="Account sign out or login"
               className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-red-400 transition-colors"
             >
               <LogOut className="h-4 w-4" />

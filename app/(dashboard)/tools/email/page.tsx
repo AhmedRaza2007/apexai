@@ -8,6 +8,8 @@ export default function EmailToolPage() {
     recipient: 'Prospective Enterprise Client',
     purpose: 'Partnership & Product Demo Proposal',
     tone: 'professional',
+    length: 'standard',
+    subjectContext: 'Q4 Enterprise Productivity Partnership',
     senderName: 'Alex Morgan, Head of Business Development',
     keyPoints:
       'We recently launched ApexAI to automate internal business workflows. Mention that our enterprise solution reduces manual task time by 40%. Request a brief 15-minute introductory call next Tuesday or Wednesday.',
@@ -17,10 +19,11 @@ export default function EmailToolPage() {
     <ToolRunner
       toolType="email"
       title="Executive Email Drafter"
-      description="Craft persuasive, polished business communications with high response rates."
+      description="Craft persuasive, polished business communications with high response rates and follow-up guidance."
       badge="High Response"
       defaultTitle="Enterprise Demo Proposal"
       initialFormData={initialData}
+      safetyNotice="Safety Notice: ApexAI generates executive-ready email drafts. To preserve business reputation and compliance, review all copy before sending. ApexAI does not dispatch emails without explicit third-party integration."
       renderForm={(formData, setFormData) => (
         <>
           <div>
@@ -49,6 +52,19 @@ export default function EmailToolPage() {
             />
           </div>
 
+          <div>
+            <label className="block text-xs font-medium text-slate-300 mb-1.5">
+              Subject Line Context / Preference
+            </label>
+            <input
+              type="text"
+              value={(formData.subjectContext as string) || ''}
+              onChange={(e) => setFormData((prev) => ({ ...prev, subjectContext: e.target.value }))}
+              placeholder="e.g. Quick question regarding Q4 operations roadmap"
+              className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
+            />
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1.5">Tone</label>
@@ -66,17 +82,30 @@ export default function EmailToolPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                Sign-off / Sender
-              </label>
-              <input
-                type="text"
-                value={(formData.senderName as string) || ''}
-                onChange={(e) => setFormData((prev) => ({ ...prev, senderName: e.target.value }))}
-                placeholder="Your Name & Title"
+              <label className="block text-xs font-medium text-slate-300 mb-1.5">Length</label>
+              <select
+                value={(formData.length as string) || 'standard'}
+                onChange={(e) => setFormData((prev) => ({ ...prev, length: e.target.value }))}
                 className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
-              />
+              >
+                <option value="concise">Concise (Under 100 words)</option>
+                <option value="standard">Standard Business Length</option>
+                <option value="detailed">Comprehensive / Proposal</option>
+              </select>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-300 mb-1.5">
+              Sign-off / Sender Identity
+            </label>
+            <input
+              type="text"
+              value={(formData.senderName as string) || ''}
+              onChange={(e) => setFormData((prev) => ({ ...prev, senderName: e.target.value }))}
+              placeholder="Your Name & Title"
+              className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
+            />
           </div>
 
           <div>
