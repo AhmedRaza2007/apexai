@@ -1,8 +1,6 @@
 // ApexAI Autonomous Native Model & Free Inference Engine
 // Provides 100% independent, zero-cost AI inference and custom model training capabilities.
 
-import { ToolType, buildToolPrompt } from './prompts';
-
 export interface TrainingExample {
   id: string;
   category: 'general' | 'email' | 'social' | 'product' | 'summary' | 'strategy';
