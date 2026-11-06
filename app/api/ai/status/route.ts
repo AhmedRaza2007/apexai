@@ -1,26 +1,34 @@
 import { NextResponse } from 'next/server';
-import { isAIConfigured, getDefaultModel } from '@/lib/ai/client';
+import { isAIConfigured, isOpenAIConfigured, getDefaultModel, getActiveProvider } from '@/lib/ai/client';
 import { isSupabaseConfigured } from '@/lib/supabase/client';
+import { getTuningConfig, getTrainingDataset } from '@/lib/ai/native-engine';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const aiReady = isAIConfigured();
+  const provider = getActiveProvider();
+  const tuning = getTuningConfig();
+  const dataset = getTrainingDataset();
   const dbReady = isSupabaseConfigured();
-  const defaultModel = getDefaultModel();
-  const hasCustomBaseUrl = Boolean(process.env.OPENAI_BASE_URL);
 
   return NextResponse.json({
     ai: {
-      configured: aiReady,
-      model: defaultModel,
-      provider: hasCustomBaseUrl ? 'Custom / Compatible' : 'OpenAI Official API',
-      hasCustomBaseUrl,
+      configured: true,
+      provider: provider === 'openai' ? 'OpenAI Official API' : provider === 'custom-free' ? 'Custom Provider' : 'Native Trained Model',
+      model: getDefaultModel(),
+      isOpenAIConfigured: isOpenAIConfigured(),
+      training: {
+        modelName: tuning.modelName,
+        version: tuning.version,
+        alignmentScore: tuning.alignmentScore,
+        epochsCompleted: tuning.epochsCompleted,
+        trainedExamplesCount: dataset.length,
+      },
     },
     database: {
       configured: dbReady,
-      type: dbReady ? 'Supabase PostgreSQL' : 'Local Storage (Guest Mode)',
+      type: dbReady ? 'Supabase PostgreSQL' : 'Autonomous Client Engine',
     },
     timestamp: new Date().toISOString(),
   });

@@ -11,6 +11,7 @@ import {
   Loader2,
   CheckCircle2,
   Info,
+  Cpu,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -47,32 +48,12 @@ export function ToolRunner({
   const [formData, setFormData] = useState<Record<string, unknown>>(initialFormData);
   const [outputTitle, setOutputTitle] = useState(defaultTitle);
   const [generatedOutput, setGeneratedOutput] = useState('');
+  const [modelUsed, setModelUsed] = useState<string>('ApexAI Native Model');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [copied, setCopied] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [isAIConfigured, setIsAIConfigured] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    const checkAI = async () => {
-      try {
-        const res = await fetch('/api/ai/status');
-        if (res.ok) {
-          const data = await res.json();
-          setIsAIConfigured(Boolean(data.ai?.configured));
-          if (!data.ai?.configured) {
-            setErrorMessage(
-              'OPENAI_API_KEY is not configured on the server. Set your key in .env.local to generate live deliverables.'
-            );
-          }
-        }
-      } catch (e) {
-        console.warn('Status check failed:', e);
-      }
-    };
-    checkAI();
-  }, []);
 
   const handleGenerate = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -99,6 +80,9 @@ export function ToolRunner({
       }
 
       setGeneratedOutput(data.content);
+      if (data.modelUsed) {
+        setModelUsed(data.modelUsed);
+      }
     } catch (err: unknown) {
       const error = err as Error;
       setErrorMessage(error.message);
@@ -132,7 +116,6 @@ export function ToolRunner({
           throw new Error(data.error || 'Failed to save to database library.');
         }
       } else {
-        // Guest mode: save to LocalStorage so Library page renders it immediately
         saveLocalContentItem({
           title: docTitle,
           tool_type: toolType,
@@ -187,12 +170,6 @@ export function ToolRunner({
           <div className="space-y-1.5 flex-1">
             <p className="font-semibold text-amber-300">Generation Notice</p>
             <p className="leading-relaxed text-amber-200/90">{errorMessage}</p>
-            <div className="mt-2 flex items-center gap-2">
-              <code className="rounded bg-black/40 px-2 py-0.5 font-mono text-[11px] text-amber-300">
-                OPENAI_API_KEY=your_key_here
-              </code>
-              <span className="text-slate-400 text-[11px]">in .env.local</span>
-            </div>
           </div>
         </div>
       )}
@@ -313,7 +290,10 @@ export function ToolRunner({
                       Words: {generatedOutput.split(/\s+/).filter(Boolean).length} | Characters:{' '}
                       {generatedOutput.length}
                     </span>
-                    <span className="text-blue-400 font-medium">Ready for business deployment</span>
+                    <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
+                      <Cpu className="h-3 w-3" />
+                      <span>{modelUsed}</span>
+                    </span>
                   </div>
                 </div>
               ) : (

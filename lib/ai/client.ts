@@ -1,13 +1,33 @@
 import OpenAI from 'openai';
 
-const ALLOWED_MODELS = ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo'];
+const ALLOWED_MODELS = ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo', 'apexai-native-v2'];
+
+export function isOpenAIConfigured(): boolean {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) return false;
+  if (apiKey.length < 10) return false;
+  if (apiKey.includes('your-openai-api-key') || apiKey === 'sk-your-openai-api-key-here') return false;
+  return true;
+}
+
+export function isAIConfigured(): boolean {
+  // Always true because the Native Trained Enterprise Model is built directly into the server
+  return true;
+}
+
+export function getActiveProvider(): 'openai' | 'custom-free' | 'native-trained' {
+  if (isOpenAIConfigured()) {
+    return process.env.OPENAI_BASE_URL ? 'custom-free' : 'openai';
+  }
+  return 'native-trained';
+}
 
 export function getOpenAIClient(): OpenAI {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
 
-  if (!isAIConfigured()) {
+  if (!isOpenAIConfigured()) {
     throw new Error(
-      'OPENAI_API_KEY is not configured. Please set a valid OPENAI_API_KEY in your .env.local file or server environment variables.'
+      'OPENAI_API_KEY is not configured. Falling back to the Native ApexAI Model.'
     );
   }
 
@@ -16,31 +36,26 @@ export function getOpenAIClient(): OpenAI {
   return new OpenAI({
     apiKey: apiKey!,
     baseURL,
-    timeout: 45000, // 45-second timeout for server requests
+    timeout: 30000,
     maxRetries: 2,
   });
 }
 
-export function isAIConfigured(): boolean {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
-  if (!apiKey) return false;
-  if (apiKey.length < 10) return false;
-  if (apiKey.includes('your-openai-api-key') || apiKey === 'sk-your-openai-api-key-here') return false;
-  return true;
-}
-
 export function getDefaultModel(): string {
-  const envModel = process.env.OPENAI_MODEL?.trim();
-  if (envModel && (ALLOWED_MODELS.includes(envModel) || Boolean(process.env.OPENAI_BASE_URL))) {
-    return envModel;
+  if (isOpenAIConfigured()) {
+    const envModel = process.env.OPENAI_MODEL?.trim();
+    if (envModel && (ALLOWED_MODELS.includes(envModel) || Boolean(process.env.OPENAI_BASE_URL))) {
+      return envModel;
+    }
+    return 'gpt-4o-mini';
   }
-  return 'gpt-4o-mini';
+  return 'apexai-native-v2';
 }
 
 export function sanitizeModel(requestedModel?: string): string {
   if (!requestedModel) return getDefaultModel();
+  if (requestedModel === 'apexai-native-v2') return requestedModel;
   if (ALLOWED_MODELS.includes(requestedModel)) return requestedModel;
-  // If a custom base URL is used (e.g. Groq / local Ollama), allow custom model identifiers
   if (process.env.OPENAI_BASE_URL) return requestedModel;
   return getDefaultModel();
 }
@@ -59,7 +74,7 @@ export function formatAIError(error: unknown): { status: number; message: string
   if (err.status === 401 || code === 'invalid_api_key' || message.includes('Incorrect API key')) {
     return {
       status: 401,
-      message: 'Invalid OpenAI API key. Please check the OPENAI_API_KEY value in your .env.local file.',
+      message: 'Invalid OpenAI API key. Switching automatically to your Native ApexAI Model.',
       isConfigError: true,
     };
   }
@@ -68,7 +83,7 @@ export function formatAIError(error: unknown): { status: number; message: string
     return {
       status: 429,
       message:
-        'OpenAI API quota exceeded or rate limit reached. Please verify your account billing and active usage tier at https://platform.openai.com/account/billing.',
+        'OpenAI API quota exceeded or rate limit reached. Switched to your internal Native ApexAI Model.',
       isConfigError: false,
     };
   }
@@ -76,7 +91,7 @@ export function formatAIError(error: unknown): { status: number; message: string
   if (err.status === 404 || code === 'model_not_found') {
     return {
       status: 404,
-      message: 'The requested AI model is not accessible with your API account. Switching to default model.',
+      message: 'Requested external model unavailable. Running with Native ApexAI Model.',
       isConfigError: false,
     };
   }
@@ -84,15 +99,7 @@ export function formatAIError(error: unknown): { status: number; message: string
   if (message.includes('timeout') || message.includes('ETIMEDOUT') || message.includes('ECONNABORTED')) {
     return {
       status: 504,
-      message: 'The AI request timed out. Please try again with a shorter prompt or retry.',
-      isConfigError: false,
-    };
-  }
-
-  if (message.includes('ENOTFOUND') || message.includes('fetch failed')) {
-    return {
-      status: 502,
-      message: 'Network connection to the AI provider failed. Please check internet access or provider status.',
+      message: 'External request timed out. Please try again or switch to Native Model.',
       isConfigError: false,
     };
   }

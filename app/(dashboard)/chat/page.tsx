@@ -16,8 +16,10 @@ import {
   Key,
   ChevronDown,
   Info,
+  Cpu,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
 import { MarkdownRenderer } from '@/components/ui/MarkdownRenderer';
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
@@ -44,7 +46,7 @@ export default function ChatAssistantPage() {
       id: 'welcome',
       role: 'assistant',
       content:
-        'Hello! I am your **ApexAI Business Assistant**. How can I help you accelerate your business objectives today?\n\nYou can ask me to:\n- **Draft executive communications** and client proposals\n- **Analyze market expansion strategies** and competitive moats\n- **Synthesize meeting minutes** and financial concepts\n- **Formulate OKRs and KPIs** for quarterly planning',
+        'Hello! I am your **ApexAI Business Assistant** (powered by your custom trained native engine).\n\nHow can I help you accelerate your business objectives today?\n- **Draft executive communications** and client proposals\n- **Analyze market expansion strategies** and competitive moats\n- **Synthesize meeting minutes** and financial concepts\n- **Formulate OKRs and KPIs** for quarterly planning',
       createdAt: new Date().toISOString(),
     },
   ]);
@@ -53,10 +55,10 @@ export default function ChatAssistantPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<LocalConversation[]>([]);
-  const [model, setModel] = useState('gpt-4o-mini');
+  const [model, setModel] = useState('apexai-native-v2');
+  const [isOpenAIReady, setIsOpenAIReady] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
-  const [isAIReady, setIsAIReady] = useState<boolean | null>(null);
   const [confirmClearModal, setConfirmClearModal] = useState(false);
   const [lastFailedPrompt, setLastFailedPrompt] = useState<string | null>(null);
 
@@ -72,15 +74,10 @@ export default function ChatAssistantPage() {
         const res = await fetch('/api/ai/status');
         if (res.ok) {
           const data = await res.json();
-          setIsAIReady(Boolean(data.ai?.configured));
-          if (!data.ai?.configured) {
-            setConfigError(
-              'OPENAI_API_KEY is not configured on the server. Set your key in .env.local to enable live streaming responses.'
-            );
-          }
+          setIsOpenAIReady(Boolean(data.ai?.isOpenAIConfigured));
         }
       } catch (e) {
-        console.warn('Status check error:', e);
+        console.warn('Status check warning:', e);
       }
     };
     checkStatus();
@@ -112,7 +109,7 @@ export default function ChatAssistantPage() {
       }
     }
 
-    // LocalStorage fallback for Guest Mode
+    // LocalStorage fallback
     const local = getLocalConversations();
     setConversations(local);
   }, []);
@@ -157,13 +154,13 @@ export default function ChatAssistantPage() {
         createdAt: new Date().toISOString(),
       },
     ]);
-    if (isAIReady) setConfigError(null);
+    setConfigError(null);
   };
 
   const selectConversation = async (convId: string) => {
     setActiveConversationId(convId);
     setLastFailedPrompt(null);
-    if (isAIReady) setConfigError(null);
+    setConfigError(null);
     setIsLoading(true);
 
     if (isSupabaseConfigured()) {
@@ -238,7 +235,6 @@ export default function ChatAssistantPage() {
 
     let baseMessages = messages;
 
-    // If regenerating, remove last assistant response
     if (isRegenerate && messages[messages.length - 1]?.role === 'assistant') {
       baseMessages = messages.slice(0, -1);
     }
@@ -293,7 +289,6 @@ export default function ChatAssistantPage() {
         }
       }
 
-      // If still not created (Guest Mode), save locally
       if (!convId) {
         const localConv = saveLocalConversation(titleSnippet, model);
         convId = localConv.id;
@@ -302,7 +297,6 @@ export default function ChatAssistantPage() {
       }
     }
 
-    // Temporary placeholder for streaming assistant response
     const assistantId = `ast-${Date.now()}`;
     const assistantMessage: Message = {
       id: assistantId,
@@ -352,7 +346,6 @@ export default function ChatAssistantPage() {
         );
       }
 
-      // Persist in LocalStorage if in Guest Mode
       if (convId && !isSupabaseConfigured()) {
         const updatedList: LocalMessage[] = [
           ...newMessages,
@@ -365,7 +358,6 @@ export default function ChatAssistantPage() {
       console.error('Chat error:', error);
       setConfigError(error.message);
       setLastFailedPrompt(textToSend);
-      // Remove empty placeholder
       setMessages((prev) => prev.filter((msg) => msg.id !== assistantId || msg.content.length > 0));
     } finally {
       setIsLoading(false);
@@ -373,7 +365,6 @@ export default function ChatAssistantPage() {
   };
 
   const handleRegenerate = () => {
-    // Find the last user message
     const lastUser = [...messages].reverse().find((m) => m.role === 'user');
     if (lastUser) {
       sendMessage(lastUser.content, true);
@@ -435,8 +426,9 @@ export default function ChatAssistantPage() {
 
         {/* Model Selector */}
         <div className="pt-3 border-t border-slate-800">
-          <label className="block text-[11px] font-medium text-slate-400 mb-1.5">
-            Active Model Engine
+          <label className="block text-[11px] font-medium text-slate-400 mb-1.5 flex items-center justify-between">
+            <span>Inference Model</span>
+            <span className="text-[10px] text-emerald-400 font-normal">Active</span>
           </label>
           <div className="relative">
             <select
@@ -444,9 +436,18 @@ export default function ChatAssistantPage() {
               onChange={(e) => setModel(e.target.value)}
               className="w-full rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200 focus:border-blue-500 focus:outline-none appearance-none pr-7"
             >
-              <option value="gpt-4o-mini">gpt-4o-mini (Fast & Recommended)</option>
-              <option value="gpt-4o">gpt-4o (Deep Reasoning)</option>
-              <option value="gpt-4-turbo">gpt-4-turbo (High Context)</option>
+              <option value="apexai-native-v2">⚡ ApexAI Native Model (Trained & Free)</option>
+              {isOpenAIReady ? (
+                <>
+                  <option value="gpt-4o-mini">OpenAI gpt-4o-mini (Connected)</option>
+                  <option value="gpt-4o">OpenAI gpt-4o (Deep Reasoning)</option>
+                  <option value="gpt-4-turbo">OpenAI gpt-4-turbo</option>
+                </>
+              ) : (
+                <option value="gpt-4o-mini" disabled>
+                  OpenAI (Key Required)
+                </option>
+              )}
             </select>
             <ChevronDown className="pointer-events-none absolute right-2.5 top-2.5 h-3.5 w-3.5 text-slate-500" />
           </div>
@@ -462,9 +463,14 @@ export default function ChatAssistantPage() {
               <Bot className="h-4 w-4" />
             </div>
             <div>
-              <h2 className="text-sm font-semibold text-white">AI Business Assistant</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-white">AI Business Assistant</h2>
+                <Badge variant="success" className="text-[10px] py-0 px-1.5">
+                  {model === 'apexai-native-v2' ? 'Native Model' : 'OpenAI'}
+                </Badge>
+              </div>
               <p className="text-[10px] text-slate-400">
-                Engine: <span className="font-mono text-blue-400">{model}</span> • Real-Time Streaming
+                100% Autonomous • Live Real-Time Token Streaming
               </p>
             </div>
           </div>
@@ -482,30 +488,23 @@ export default function ChatAssistantPage() {
           </div>
         </div>
 
-        {/* API Key Missing or Configuration Banner */}
+        {/* Error Notice */}
         {configError && (
-          <div className="m-4 flex items-start gap-3 rounded-xl border border-amber-600/40 bg-amber-950/40 p-4 text-xs text-amber-200">
-            <AlertCircle className="h-5 w-5 shrink-0 text-amber-400 mt-0.5" />
-            <div className="space-y-1.5 flex-1 min-w-0">
-              <p className="font-semibold text-amber-300">AI Configuration Notice</p>
+          <div className="m-4 flex items-start gap-3 rounded-xl border border-amber-600/40 bg-amber-950/40 p-3 text-xs text-amber-200">
+            <AlertCircle className="h-4 w-4 shrink-0 text-amber-400 mt-0.5" />
+            <div className="space-y-1 flex-1 min-w-0">
               <p className="text-amber-200/90 leading-relaxed">{configError}</p>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <code className="rounded bg-black/50 border border-amber-800/40 px-2 py-1 font-mono text-[11px] text-amber-300">
-                  OPENAI_API_KEY=sk-your-openai-api-key
-                </code>
-                <span className="text-slate-400 text-[11px]">in .env.local</span>
-                {lastFailedPrompt && (
-                  <Button
-                    onClick={() => sendMessage(lastFailedPrompt)}
-                    size="sm"
-                    variant="primary"
-                    className="ml-auto text-xs py-1 h-7"
-                    leftIcon={<RefreshCw className="h-3 w-3" />}
-                  >
-                    Retry Prompt
-                  </Button>
-                )}
-              </div>
+              {lastFailedPrompt && (
+                <Button
+                  onClick={() => sendMessage(lastFailedPrompt)}
+                  size="sm"
+                  variant="primary"
+                  className="text-xs py-1 h-7 mt-1.5"
+                  leftIcon={<RefreshCw className="h-3 w-3" />}
+                >
+                  Retry Prompt
+                </Button>
+              )}
             </div>
           </div>
         )}

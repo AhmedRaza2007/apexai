@@ -3,15 +3,17 @@
 import React, { useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Sparkles, Mail, Lock, AlertCircle, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Sparkles, Mail, Lock, AlertCircle, ArrowRight, CheckCircle2, User as UserIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
+import { registerLocalUser, loginLocalUser } from '@/lib/auth';
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectedFrom = searchParams.get('redirectedFrom') || '/dashboard';
 
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -25,64 +27,100 @@ function LoginForm() {
     setSuccessMessage(null);
     setIsLoading(true);
 
-    if (!email || !password) {
+    if (!email.trim() || !password.trim()) {
       setErrorMessage('Please enter both email and password.');
       setIsLoading(false);
       return;
     }
 
-    if (!isSupabaseConfigured()) {
-      // In guest / demo mode when Supabase credentials are not populated
-      setTimeout(() => {
-        setIsLoading(false);
-        router.push(redirectedFrom);
-      }, 500);
+    if (password.length < 4) {
+      setErrorMessage('Password must be at least 4 characters.');
+      setIsLoading(false);
       return;
     }
 
-    try {
-      const supabase = createClient();
+    // 1. Try Supabase if configured
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = createClient();
 
-      if (isSignUpMode) {
-        const { error, data } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: {
-              full_name: email.split('@')[0],
+        if (isSignUpMode) {
+          const { error, data } = await supabase.auth.signUp({
+            email: email.trim(),
+            password,
+            options: {
+              data: {
+                full_name: fullName.trim() || email.split('@')[0],
+              },
             },
-          },
-        });
+          });
 
-        if (error) {
-          setErrorMessage(error.message);
-        } else if (data.session) {
-          router.push(redirectedFrom);
-          router.refresh();
+          if (error) {
+            setErrorMessage(error.message);
+            setIsLoading(false);
+            return;
+          } else if (data.session) {
+            setSuccessMessage('Account created successfully! Redirecting...');
+            setTimeout(() => {
+              router.push(redirectedFrom);
+              router.refresh();
+            }, 600);
+            return;
+          } else {
+            setSuccessMessage(
+              'Account created! If email confirmation is required, please check your inbox.'
+            );
+            setIsLoading(false);
+            return;
+          }
         } else {
-          setSuccessMessage(
-            'Account created! If email confirmation is enabled, check your inbox to confirm your account.'
-          );
-        }
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
+          const { error } = await supabase.auth.signInWithPassword({
+            email: email.trim(),
+            password,
+          });
 
-        if (error) {
-          setErrorMessage(error.message);
-        } else {
-          router.push(redirectedFrom);
-          router.refresh();
+          if (error) {
+            setErrorMessage(error.message);
+            setIsLoading(false);
+            return;
+          } else {
+            setSuccessMessage('Login successful! Redirecting...');
+            setTimeout(() => {
+              router.push(redirectedFrom);
+              router.refresh();
+            }, 600);
+            return;
+          }
         }
+      } catch (err: unknown) {
+        console.warn('Supabase auth attempt failed, falling back to autonomous local auth:', err);
       }
-    } catch (err: unknown) {
-      const error = err as Error;
-      setErrorMessage(error.message || 'An error occurred during authentication.');
-    } finally {
-      setIsLoading(false);
     }
+
+    // 2. Autonomous Local Account Registration & Login Engine
+    if (isSignUpMode) {
+      const res = registerLocalUser(email, password, fullName);
+      if (!res.success) {
+        setErrorMessage(res.error || 'Failed to create account.');
+        setIsLoading(false);
+        return;
+      }
+      setSuccessMessage(`Account created for ${res.user?.fullName}! Setting up your workspace...`);
+    } else {
+      const res = loginLocalUser(email, password);
+      if (!res.success) {
+        setErrorMessage(res.error || 'Invalid credentials.');
+        setIsLoading(false);
+        return;
+      }
+      setSuccessMessage(`Welcome back, ${res.user?.fullName}! Launching dashboard...`);
+    }
+
+    setTimeout(() => {
+      setIsLoading(false);
+      router.push(redirectedFrom);
+      router.refresh();
+    }, 700);
   };
 
   return (
@@ -100,20 +138,21 @@ function LoginForm() {
         </h2>
         <p className="mt-1.5 text-xs text-slate-400">
           {isSignUpMode
-            ? 'Start automating everyday tasks and drafting high-impact content.'
-            : 'Sign in to access your chat history, business tools, and automations.'}
+            ? 'Sign up to build AI business tools, train custom models, and save deliverables.'
+            : 'Sign in to access your chat history, business tools, and custom models.'}
         </p>
       </div>
 
       {/* Auth Card */}
       <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-7 shadow-2xl backdrop-blur-md">
-        {/* Tabs */}
+        {/* Mode Switcher Tabs */}
         <div className="mb-6 flex rounded-lg bg-slate-950/80 p-1 border border-slate-800">
           <button
             type="button"
             onClick={() => {
               setIsSignUpMode(false);
               setErrorMessage(null);
+              setSuccessMessage(null);
             }}
             className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${
               !isSignUpMode
@@ -128,6 +167,7 @@ function LoginForm() {
             onClick={() => {
               setIsSignUpMode(true);
               setErrorMessage(null);
+              setSuccessMessage(null);
             }}
             className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${
               isSignUpMode
@@ -139,7 +179,7 @@ function LoginForm() {
           </button>
         </div>
 
-        {/* Notifications */}
+        {/* Feedback Messages */}
         {errorMessage && (
           <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-red-800/60 bg-red-950/40 p-3 text-xs text-red-300">
             <AlertCircle className="h-4 w-4 shrink-0 text-red-400 mt-0.5" />
@@ -148,7 +188,7 @@ function LoginForm() {
         )}
 
         {successMessage && (
-          <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-emerald-800/60 bg-emerald-950/40 p-3 text-xs text-emerald-300">
+          <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-emerald-800/60 bg-emerald-950/40 p-3 text-xs text-emerald-300 animate-in fade-in">
             <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400 mt-0.5" />
             <span>{successMessage}</span>
           </div>
@@ -156,6 +196,22 @@ function LoginForm() {
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
+          {isSignUpMode && (
+            <div>
+              <label className="block text-xs font-medium text-slate-300">Full Name</label>
+              <div className="relative mt-1.5">
+                <UserIcon className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
+                <input
+                  type="text"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="e.g. Alex Morgan"
+                  className="w-full rounded-lg border border-slate-800 bg-slate-950/90 py-2 pl-9 pr-3 text-sm text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="block text-xs font-medium text-slate-300">Work Email</label>
             <div className="relative mt-1.5">
@@ -196,17 +252,17 @@ function LoginForm() {
             isLoading={isLoading}
             rightIcon={<ArrowRight className="h-4 w-4" />}
           >
-            {isSignUpMode ? 'Sign Up for ApexAI' : 'Sign In'}
+            {isSignUpMode ? 'Create Account' : 'Sign In'}
           </Button>
         </form>
 
-        {/* Guest / Direct Explorer Mode */}
+        {/* Guest Explorer Option */}
         <div className="mt-5 border-t border-slate-800/80 pt-4 text-center">
           <Link
             href="/dashboard"
             className="text-xs text-slate-400 hover:text-blue-400 transition-colors"
           >
-            Continue in Guest Demo Mode →
+            Continue as Guest Explorer →
           </Link>
         </div>
       </div>
@@ -220,7 +276,7 @@ export default function LoginPage() {
       <Suspense
         fallback={
           <div className="flex items-center justify-center text-sm text-slate-400">
-            Loading...
+            Loading authentication...
           </div>
         }
       >

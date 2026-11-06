@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { Navbar } from '@/components/layout/Navbar';
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
+import { getCurrentUser } from '@/lib/auth';
 
 export default function DashboardLayout({
   children,
@@ -12,12 +13,13 @@ export default function DashboardLayout({
 }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [userEmail, setUserEmail] = useState<string | undefined>(undefined);
+  const [userName, setUserName] = useState<string | undefined>(undefined);
   const [isDBConnected, setIsDBConnected] = useState(false);
-  const [isAIConnected, setIsAIConnected] = useState(false);
+  const [isAIConnected, setIsAIConnected] = useState(true); // Native AI Engine is always active
 
   useEffect(() => {
-    // 1. Check Supabase DB Status
-    const checkDB = async () => {
+    // 1. Check Auth & Profile
+    const checkAuth = async () => {
       const configured = isSupabaseConfigured();
       setIsDBConnected(configured);
 
@@ -29,14 +31,23 @@ export default function DashboardLayout({
           } = await supabase.auth.getUser();
           if (user?.email) {
             setUserEmail(user.email);
+            setUserName(user.user_metadata?.full_name || user.email.split('@')[0]);
+            return;
           }
         } catch {
-          // Fallback to guest mode
+          // Fallback to local user
         }
+      }
+
+      // Check autonomous local account session
+      const localUser = getCurrentUser();
+      if (localUser) {
+        setUserEmail(localUser.email);
+        setUserName(localUser.fullName);
       }
     };
 
-    // 2. Query Server AI Configuration Status
+    // 2. Query Server AI Status
     const checkAI = async () => {
       try {
         const res = await fetch('/api/ai/status');
@@ -45,11 +56,11 @@ export default function DashboardLayout({
           setIsAIConnected(Boolean(data.ai?.configured));
         }
       } catch (e) {
-        console.warn('Could not retrieve AI status:', e);
+        console.warn('Status check warning:', e);
       }
     };
 
-    checkDB();
+    checkAuth();
     checkAI();
   }, []);
 
@@ -60,6 +71,7 @@ export default function DashboardLayout({
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
         userEmail={userEmail}
+        userName={userName}
       />
 
       {/* Main Content Area */}

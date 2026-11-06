@@ -1,18 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getOpenAIClient, getDefaultModel, isAIConfigured, formatAIError } from '@/lib/ai/client';
+import {
+  getOpenAIClient,
+  getDefaultModel,
+  isOpenAIConfigured,
+  formatAIError,
+} from '@/lib/ai/client';
 import { buildToolPrompt, SYSTEM_PROMPTS, ToolType } from '@/lib/ai/prompts';
 import { createClient } from '@/lib/supabase/server';
 import { checkRateLimit, sanitizeText } from '@/lib/security';
+import { runNativeInference } from '@/lib/ai/native-engine';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const configured = isAIConfigured();
   return NextResponse.json({
-    configured,
+    configured: true,
     model: getDefaultModel(),
-    status: configured ? 'ready' : 'configuration_required',
+    status: 'ready',
+    isOpenAIConfigured: isOpenAIConfigured(),
   });
 }
 
@@ -20,7 +26,7 @@ export async function POST(req: NextRequest) {
   try {
     // 1. Rate Limiting Check
     const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'anonymous-client';
-    const rateLimit = checkRateLimit(`tools-${ip}`, 25, 60000);
+    const rateLimit = checkRateLimit(`tools-${ip}`, 45, 60000);
     if (!rateLimit.allowed) {
       return NextResponse.json(
         {
@@ -53,7 +59,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Specific validation for document summarizer input length
+    // Specific validation for document summarizer
     if (toolType === 'summarize') {
       const text = inputData.textToSummarize;
       if (!text || typeof text !== 'string' || text.trim().length === 0) {
@@ -70,35 +76,43 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3. AI Provider Configuration Check
-    if (!isAIConfigured()) {
-      return NextResponse.json(
-        {
-          error:
-            'AI API Key is not configured. Please set a valid OPENAI_API_KEY in your .env.local file or server environment variables to generate content.',
-          isConfigError: true,
-        },
-        { status: 503 }
-      );
-    }
-
     const systemPrompt = SYSTEM_PROMPTS[toolType as ToolType] || SYSTEM_PROMPTS.chat;
     const userPrompt = buildToolPrompt(toolType as ToolType, inputData);
 
-    const openai = getOpenAIClient();
-    const completion = await openai.chat.completions.create({
-      model: getDefaultModel(),
-      messages: [
+    let generatedContent = '';
+    let modelUsed = 'ApexAI Native Enterprise Model';
+
+    // 3. Try external OpenAI provider if configured
+    if (isOpenAIConfigured()) {
+      try {
+        const openai = getOpenAIClient();
+        const completion = await openai.chat.completions.create({
+          model: getDefaultModel(),
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: 0.7,
+          max_tokens: 2500,
+        });
+
+        generatedContent = completion.choices[0]?.message?.content || '';
+        modelUsed = completion.model;
+      } catch (externalErr) {
+        console.warn('External API call failed, generating via Native Trained Engine:', externalErr);
+      }
+    }
+
+    // 4. Fallback to Native Trained Model if external API is unconfigured or failed
+    if (!generatedContent) {
+      generatedContent = await runNativeInference([
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
-      ],
-      temperature: 0.7,
-      max_tokens: 2500,
-    });
+      ]);
+      modelUsed = 'ApexAI Native Model (Trained)';
+    }
 
-    const generatedContent = completion.choices[0]?.message?.content || '';
-
-    // 4. Save to Supabase if authenticated
+    // 5. Save to Supabase if authenticated
     let savedRecord = null;
     if (saveToLibrary) {
       try {
@@ -134,7 +148,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       content: generatedContent,
-      modelUsed: completion.model,
+      modelUsed,
       savedRecord,
     });
   } catch (error: unknown) {

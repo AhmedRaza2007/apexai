@@ -19,17 +19,20 @@ import {
   ShieldCheck,
   User,
   X,
+  Cpu,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
+import { logoutLocalUser } from '@/lib/auth';
 
 interface SidebarProps {
   userEmail?: string;
+  userName?: string;
   isOpen?: boolean;
   onClose?: () => void;
 }
 
-export function Sidebar({ userEmail, isOpen = true, onClose }: SidebarProps) {
+export function Sidebar({ userEmail, userName, isOpen = true, onClose }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
 
@@ -39,10 +42,12 @@ export function Sidebar({ userEmail, isOpen = true, onClose }: SidebarProps) {
         const supabase = createClient();
         await supabase.auth.signOut();
       }
+      logoutLocalUser();
       router.push('/login');
       router.refresh();
     } catch (e) {
       console.error('Sign out error:', e);
+      logoutLocalUser();
       router.push('/login');
     }
   };
@@ -62,6 +67,7 @@ export function Sidebar({ userEmail, isOpen = true, onClose }: SidebarProps) {
 
   const secondaryNavigation = [
     { name: 'Saved Library', href: '/library', icon: Bookmark },
+    { name: 'Model Training Studio', href: '/train', icon: Cpu, badge: 'Native API' },
     { name: 'Automations', href: '/automations', icon: Zap, badge: 'Safeguarded' },
   ];
 
@@ -176,10 +182,10 @@ export function Sidebar({ userEmail, isOpen = true, onClose }: SidebarProps) {
             </nav>
           </div>
 
-          {/* Operations & Safeguards */}
+          {/* Operations & Model Engine */}
           <div>
             <div className="px-3 pb-2 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
-              Operations
+              Operations & Engine
             </div>
             <nav className="space-y-1">
               {secondaryNavigation.map((item) => {
@@ -203,7 +209,11 @@ export function Sidebar({ userEmail, isOpen = true, onClose }: SidebarProps) {
                     </div>
                     {item.badge && (
                       <span className="flex items-center gap-1 rounded bg-blue-950/80 px-1.5 py-0.5 text-[10px] font-medium text-blue-400 border border-blue-800/50">
-                        <ShieldCheck className="h-3 w-3" />
+                        {item.name === 'Model Training Studio' ? (
+                          <Cpu className="h-3 w-3" />
+                        ) : (
+                          <ShieldCheck className="h-3 w-3" />
+                        )}
                         {item.badge}
                       </span>
                     )}
@@ -219,14 +229,18 @@ export function Sidebar({ userEmail, isOpen = true, onClose }: SidebarProps) {
           <div className="flex items-center justify-between rounded-xl bg-slate-900/80 p-2.5 border border-slate-800">
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-600 text-xs font-semibold text-white">
-                {userEmail ? userEmail.slice(0, 2).toUpperCase() : <User className="h-4 w-4" />}
+                {userName
+                  ? userName.slice(0, 2).toUpperCase()
+                  : userEmail
+                  ? userEmail.slice(0, 2).toUpperCase()
+                  : <User className="h-4 w-4" />}
               </div>
               <div className="min-w-0">
                 <p className="truncate text-xs font-medium text-white">
-                  {userEmail || 'Guest Explorer'}
+                  {userName || userEmail || 'Guest Explorer'}
                 </p>
                 <p className="text-[10px] text-slate-400 truncate">
-                  {userEmail ? 'Authenticated User' : 'Local Persistence Mode'}
+                  {userEmail || 'Local Persistence Mode'}
                 </p>
               </div>
             </div>
