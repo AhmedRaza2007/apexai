@@ -1,15 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  getOpenAIClient,
-  getDefaultModel,
-  isOpenAIConfigured,
-  sanitizeModel,
-  formatAIError,
-} from '@/lib/ai/client';
+import { getDefaultModel, formatAIError } from '@/lib/ai/client';
 import { SYSTEM_PROMPTS } from '@/lib/ai/prompts';
 import { createClient } from '@/lib/supabase/server';
 import { checkRateLimit, sanitizeText } from '@/lib/security';
-import { runNativeInference } from '@/lib/ai/native-engine';
+import { dispatchStreamInference, getModelDescriptor } from '@/lib/ai/providers';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,7 +13,6 @@ export async function GET() {
     configured: true,
     model: getDefaultModel(),
     status: 'ready',
-    isOpenAIConfigured: isOpenAIConfigured(),
   });
 }
 
@@ -27,7 +20,7 @@ export async function POST(req: NextRequest) {
   try {
     // 1. Rate Limiting Check
     const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'anonymous-client';
-    const rateLimit = checkRateLimit(`chat-${ip}`, 45, 60000);
+    const rateLimit = checkRateLimit(`chat-${ip}`, 60, 60000);
     if (!rateLimit.allowed) {
       return NextResponse.json(
         {
@@ -43,7 +36,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid request: Request body must be valid JSON.' }, { status: 400 });
     }
 
-    const { messages, conversationId, model } = body;
+    const { messages, conversationId, model, knowledgeContext } = body;
 
     if (!Array.isArray(messages) || messages.length === 0) {
       return NextResponse.json(
@@ -59,7 +52,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const targetModel = sanitizeModel(model);
+    const targetModel = typeof model === 'string' && model ? model : getDefaultModel();
 
     // 3. Verify User Session for optional DB persistence
     let userId: string | null = null;
@@ -110,142 +103,31 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const encoder = new TextEncoder();
-
-    // 4. Check if external third-party provider is configured and requested
-    if (isOpenAIConfigured() && targetModel !== 'apexai-native-v2') {
-      try {
-        const openai = getOpenAIClient();
-        const apiMessages = [
-          { role: 'system' as const, content: SYSTEM_PROMPTS.chat },
-          ...sanitizedMessages,
-        ];
-
-        const responseStream = await openai.chat.completions.create({
-          model: targetModel,
-          messages: apiMessages,
-          stream: true,
-          temperature: 0.7,
-          max_tokens: 3000,
-        });
-
-        let completeAssistantResponse = '';
-
-        const readable = new ReadableStream({
-          async start(controller) {
-            try {
-              for await (const chunk of responseStream) {
-                if (req.signal.aborted) {
-                  controller.close();
-                  return;
-                }
-                const content = chunk.choices[0]?.delta?.content || '';
-                if (content) {
-                  completeAssistantResponse += content;
-                  controller.enqueue(encoder.encode(content));
-                }
-              }
-
-              if (userId && supabaseClient && conversationId && completeAssistantResponse) {
-                try {
-                  await supabaseClient.from('messages').insert({
-                    conversation_id: conversationId,
-                    user_id: userId,
-                    role: 'assistant',
-                    content: completeAssistantResponse,
-                  });
-                } catch (err) {
-                  console.warn('Failed to persist assistant message:', err);
-                }
-              }
-
-              controller.close();
-            } catch (streamError) {
-              if (req.signal.aborted) {
-                try { controller.close(); } catch {}
-                return;
-              }
-              console.error('Streaming chunk error:', streamError);
-              controller.error(streamError);
-            }
-          },
-        });
-
-        return new Response(readable, {
-          headers: {
-            'Content-Type': 'text/plain; charset=utf-8',
-            'Cache-Control': 'no-cache, no-transform',
-            'Transfer-Encoding': 'chunked',
-          },
-        });
-      } catch (openaiErr) {
-        console.warn('External API call failed or quota exceeded, switching to Native Trained Engine:', openaiErr);
-        // Fall through to native model!
-      }
+    // Prepare system prompt, appending knowledge context if provided
+    let systemPrompt = SYSTEM_PROMPTS.chat;
+    if (knowledgeContext && typeof knowledgeContext === 'string' && knowledgeContext.trim()) {
+      systemPrompt += `\n\n### Attached Knowledge Base Context:\n${knowledgeContext.slice(0, 8000)}\n\nPlease ground your response in the provided knowledge base context where relevant. Cite specific references where appropriate.`;
     }
 
-    // 5. Native Autonomous Trained Model Inference (Zero-cost, 100% offline-ready)
-    const nativeOutput = await runNativeInference(sanitizedMessages, targetModel);
+    // 4. Multi-Provider Streaming Inference Dispatch
+    const { readable, modelUsed, providerUsed, fallbackTriggered } = await dispatchStreamInference(
+      sanitizedMessages,
+      targetModel,
+      req.signal,
+      systemPrompt
+    );
 
-    // Group text into natural token chunks (2-4 words per chunk) for smooth, non-blocking delivery
-    const rawTokens = nativeOutput.split(/(\s+)/);
-    const chunks: string[] = [];
-    let currentChunk = '';
-
-    for (let i = 0; i < rawTokens.length; i++) {
-      currentChunk += rawTokens[i];
-      // Flush every 2 words or on newlines
-      if (rawTokens[i].includes('\n') || i % 4 === 3 || i === rawTokens.length - 1) {
-        chunks.push(currentChunk);
-        currentChunk = '';
-      }
-    }
-    if (currentChunk) chunks.push(currentChunk);
-
-    const readable = new ReadableStream({
-      async start(controller) {
-        try {
-          for (let i = 0; i < chunks.length; i++) {
-            if (req.signal.aborted) {
-              controller.close();
-              return;
-            }
-
-            controller.enqueue(encoder.encode(chunks[i]));
-
-            // Smooth 20ms cadence between token chunks
-            await new Promise((resolve) => setTimeout(resolve, 20));
-          }
-
-          if (userId && supabaseClient && conversationId && nativeOutput) {
-            try {
-              await supabaseClient.from('messages').insert({
-                conversation_id: conversationId,
-                user_id: userId,
-                role: 'assistant',
-                content: nativeOutput,
-              });
-            } catch (err) {
-              console.warn('Failed to persist assistant message:', err);
-            }
-          }
-
-          controller.close();
-        } catch (streamErr) {
-          if (req.signal.aborted) {
-            try { controller.close(); } catch {}
-            return;
-          }
-          controller.error(streamErr);
-        }
-      },
-    });
+    const descriptor = getModelDescriptor(modelUsed);
 
     return new Response(readable, {
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',
         'Cache-Control': 'no-cache, no-transform',
         'Transfer-Encoding': 'chunked',
+        'X-Model-Used': modelUsed,
+        'X-Model-Name': descriptor.name,
+        'X-Provider-Used': providerUsed,
+        'X-Fallback-Triggered': fallbackTriggered ? 'true' : 'false',
       },
     });
   } catch (error: unknown) {

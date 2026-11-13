@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import {
   Send,
   Bot,
@@ -15,6 +16,11 @@ import {
   RotateCcw,
   Square,
   ChevronDown,
+  Edit2,
+  BookOpen,
+  Crown,
+  Layers,
+  Info,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -30,12 +36,17 @@ import {
   LocalConversation,
   LocalMessage,
 } from '@/lib/storage';
+import { SUPPORTED_MODELS, ModelDescriptor, getModelDescriptor } from '@/lib/ai/providers';
+import { getLocalKnowledgeCollections, searchKnowledgeBase } from '@/lib/ai/knowledge';
+import { checkAndIncrementDailyUsage, getClientSubscription, SUBSCRIPTION_PLANS } from '@/lib/subscription';
 
 interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   createdAt: string;
+  modelUsed?: string;
+  providerUsed?: string;
 }
 
 // Memoized single message bubble to prevent re-rendering entire conversation on each stream chunk
@@ -46,6 +57,7 @@ const ChatMessageBubble = React.memo(function ChatMessageBubble({
   copiedId,
   onCopy,
   onRegenerate,
+  onEdit,
 }: {
   message: Message;
   isLastAssistant: boolean;
@@ -53,6 +65,7 @@ const ChatMessageBubble = React.memo(function ChatMessageBubble({
   copiedId: string | null;
   onCopy: (id: string, text: string) => void;
   onRegenerate: () => void;
+  onEdit?: (text: string) => void;
 }) {
   const isUser = message.role === 'user';
 
@@ -77,36 +90,66 @@ const ChatMessageBubble = React.memo(function ChatMessageBubble({
           <MarkdownRenderer content={message.content} />
         )}
 
-        {/* Actions Bar for Assistant Responses */}
-        {!isUser && message.content && (
-          <div className="mt-3 pt-2 flex items-center gap-2 border-t border-slate-800/60 text-xs">
+        {/* User Action Bar (Edit Prompt & Copy) */}
+        {isUser && onEdit && (
+          <div className="mt-2 pt-1.5 flex items-center justify-end gap-2 border-t border-blue-500/30 text-xs opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              onClick={() => onEdit(message.content)}
+              aria-label="Edit message"
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-blue-100 hover:bg-blue-700/50 transition-colors text-[11px]"
+            >
+              <Edit2 className="h-3 w-3" />
+              <span>Edit</span>
+            </button>
             <button
               onClick={() => onCopy(message.id, message.content)}
-              aria-label="Copy assistant answer"
-              className="flex items-center gap-1 rounded px-2 py-1 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+              aria-label="Copy prompt"
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-blue-100 hover:bg-blue-700/50 transition-colors text-[11px]"
             >
-              {copiedId === message.id ? (
-                <>
-                  <Check className="h-3.5 w-3.5 text-emerald-400" />
-                  <span className="text-emerald-400 text-[11px]">Copied</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="h-3.5 w-3.5" />
-                  <span className="text-[11px]">Copy response</span>
-                </>
-              )}
+              <Copy className="h-3 w-3" />
+              <span>Copy</span>
             </button>
+          </div>
+        )}
 
-            {isLastAssistant && !isLoading && (
+        {/* Actions Bar for Assistant Responses */}
+        {!isUser && message.content && (
+          <div className="mt-3 pt-2 flex items-center justify-between border-t border-slate-800/60 text-xs">
+            <div className="flex items-center gap-2">
               <button
-                onClick={onRegenerate}
-                aria-label="Regenerate response"
+                onClick={() => onCopy(message.id, message.content)}
+                aria-label="Copy assistant answer"
                 className="flex items-center gap-1 rounded px-2 py-1 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
               >
-                <RefreshCw className="h-3.5 w-3.5" />
-                <span className="text-[11px]">Regenerate</span>
+                {copiedId === message.id ? (
+                  <>
+                    <Check className="h-3.5 w-3.5 text-emerald-400" />
+                    <span className="text-emerald-400 text-[11px]">Copied</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3.5 w-3.5" />
+                    <span className="text-[11px]">Copy response</span>
+                  </>
+                )}
               </button>
+
+              {isLastAssistant && !isLoading && (
+                <button
+                  onClick={onRegenerate}
+                  aria-label="Regenerate response"
+                  className="flex items-center gap-1 rounded px-2 py-1 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  <span className="text-[11px]">Regenerate</span>
+                </button>
+              )}
+            </div>
+
+            {message.modelUsed && (
+              <span className="text-[10px] text-slate-500 font-mono">
+                {message.modelUsed}
+              </span>
             )}
           </div>
         )}
@@ -127,7 +170,7 @@ export default function ChatAssistantPage() {
       id: 'welcome',
       role: 'assistant',
       content:
-        'Hello! I am your **ApexAI Business Assistant** (powered by your custom trained native engine).\n\nHow can I help you accelerate your business objectives today?\n- **Draft executive communications** and client proposals\n- **Analyze market expansion strategies** and competitive moats\n- **Synthesize meeting minutes** and financial concepts\n- **Formulate OKRs and KPIs** for quarterly planning',
+        'Hello! I am your **ApexAI Assistant**, equipped with multi-model intelligence, custom knowledge grounding, and coding capabilities.\n\nHow can I help you today?\n- **Draft high-impact business strategies** and proposals\n- **Explain complex technical & coding concepts** with examples\n- **Analyze market expansion opportunities** and competitive moats\n- **Ground answers in your private documents** via Knowledge Studio',
       createdAt: new Date().toISOString(),
     },
   ]);
@@ -137,11 +180,13 @@ export default function ChatAssistantPage() {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<LocalConversation[]>([]);
   const [model, setModel] = useState('apexai-native-v2');
-  const [isOpenAIReady, setIsOpenAIReady] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
   const [confirmClearModal, setConfirmClearModal] = useState(false);
+  const [limitModalOpen, setLimitModalOpen] = useState(false);
   const [lastFailedPrompt, setLastFailedPrompt] = useState<string | null>(null);
+  const [attachKnowledge, setAttachKnowledge] = useState(false);
+  const [knowledgeDocCount, setKnowledgeDocCount] = useState(0);
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -149,20 +194,11 @@ export default function ChatAssistantPage() {
   const userScrolledUpRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Check initial server AI configuration status
+  // Load knowledge collection info
   useEffect(() => {
-    const checkStatus = async () => {
-      try {
-        const res = await fetch('/api/ai/status');
-        if (res.ok) {
-          const data = await res.json();
-          setIsOpenAIReady(Boolean(data.ai?.isOpenAIConfigured));
-        }
-      } catch (e) {
-        console.warn('Status check warning:', e);
-      }
-    };
-    checkStatus();
+    const collections = getLocalKnowledgeCollections();
+    const count = collections.reduce((acc, c) => acc + c.documents.length, 0);
+    setKnowledgeDocCount(count);
   }, []);
 
   // Cleanup in-flight requests on unmount
@@ -200,7 +236,6 @@ export default function ChatAssistantPage() {
       }
     }
 
-    // LocalStorage fallback
     const local = getLocalConversations();
     setConversations(local);
   }, []);
@@ -209,7 +244,6 @@ export default function ChatAssistantPage() {
     loadConversations();
   }, [loadConversations]);
 
-  // Handle user scroll detection: do not auto-scroll if user scrolled up to read earlier messages
   const handleScroll = () => {
     if (!messagesContainerRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
@@ -217,7 +251,6 @@ export default function ChatAssistantPage() {
     userScrolledUpRef.current = distanceFromBottom > 120;
   };
 
-  // Instant scroll during streaming prevents Chrome compositor smooth scroll queuing & freeze
   const scrollToBottom = useCallback((instant = false) => {
     if (userScrolledUpRef.current) return;
     const container = messagesContainerRef.current;
@@ -231,7 +264,6 @@ export default function ChatAssistantPage() {
   }, []);
 
   useEffect(() => {
-    // While actively streaming, use instant scroll to eliminate layout thrashing
     scrollToBottom(isLoading);
   }, [messages, isLoading, scrollToBottom]);
 
@@ -239,6 +271,15 @@ export default function ChatAssistantPage() {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
+  }, []);
+
+  const handleEditPrompt = useCallback((text: string) => {
+    setInput(text);
+    if (textareaRef.current) {
+      textareaRef.current.focus();
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 140)}px`;
+    }
   }, []);
 
   const handleStopGeneration = useCallback(() => {
@@ -258,7 +299,7 @@ export default function ChatAssistantPage() {
         id: 'welcome',
         role: 'assistant',
         content:
-          'Started a fresh session. How can I assist your business objectives right now?',
+          'Started a fresh session. How can I assist your objectives right now?',
         createdAt: new Date().toISOString(),
       },
     ]);
@@ -298,7 +339,6 @@ export default function ChatAssistantPage() {
       }
     }
 
-    // LocalStorage fallback
     const localMsgs = getLocalMessages(convId);
     if (localMsgs.length > 0) {
       setMessages(localMsgs);
@@ -338,7 +378,13 @@ export default function ChatAssistantPage() {
   const sendMessage = async (textToSend: string, isRegenerate = false) => {
     if (!textToSend.trim() || isLoading) return;
 
-    // Abort any prior in-flight request
+    // Check daily message usage limit
+    const usageCheck = checkAndIncrementDailyUsage();
+    if (!usageCheck.allowed) {
+      setLimitModalOpen(true);
+      return;
+    }
+
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -369,6 +415,17 @@ export default function ChatAssistantPage() {
 
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
+    }
+
+    // Retrieve RAG context if enabled
+    let knowledgeContext = '';
+    if (attachKnowledge) {
+      const collections = getLocalKnowledgeCollections();
+      const allDocs = collections.flatMap((c) => c.documents);
+      const retrieved = searchKnowledgeBase(textToSend, allDocs, 3);
+      if (retrieved.length > 0) {
+        knowledgeContext = retrieved.join('\n\n---\n\n');
+      }
     }
 
     // Ensure conversation session exists
@@ -434,6 +491,7 @@ export default function ChatAssistantPage() {
             .map((m) => ({ role: m.role, content: m.content })),
           conversationId: convId,
           model,
+          knowledgeContext: knowledgeContext || undefined,
         }),
       });
 
@@ -446,18 +504,27 @@ export default function ChatAssistantPage() {
         throw new Error('Streaming response body is unavailable.');
       }
 
+      const modelUsedHeader = response.headers.get('X-Model-Name') || model;
+      const providerUsedHeader = response.headers.get('X-Provider-Used') || 'ai';
+
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let streamedContent = '';
       let lastFlushTime = 0;
       let scheduledFlush: ReturnType<typeof setTimeout> | null = null;
 
-      // Throttled flush helper to prevent React from re-rendering hundreds of times per second
       const flushUpdate = (isFinal = false) => {
         const contentSnapshot = streamedContent;
         setMessages((prev) =>
           prev.map((msg) =>
-            msg.id === assistantId ? { ...msg, content: contentSnapshot } : msg
+            msg.id === assistantId
+              ? {
+                  ...msg,
+                  content: contentSnapshot,
+                  modelUsed: modelUsedHeader,
+                  providerUsed: providerUsedHeader,
+                }
+              : msg
           )
         );
         lastFlushTime = Date.now();
@@ -474,7 +541,6 @@ export default function ChatAssistantPage() {
         streamedContent += chunk;
 
         const now = Date.now();
-        // Flush at most every 40ms (~25fps throttled updates)
         if (now - lastFlushTime >= 40) {
           flushUpdate();
         } else if (!scheduledFlush) {
@@ -485,13 +551,12 @@ export default function ChatAssistantPage() {
         }
       }
 
-      // Guarantee final state flush
       flushUpdate(true);
 
       if (convId && !isSupabaseConfigured()) {
         const updatedList: LocalMessage[] = [
           ...newMessages,
-          { ...assistantMessage, content: streamedContent },
+          { ...assistantMessage, content: streamedContent, modelUsed: modelUsedHeader },
         ];
         saveLocalMessages(convId, updatedList);
       }
@@ -508,7 +573,6 @@ export default function ChatAssistantPage() {
     } finally {
       setIsLoading(false);
       abortControllerRef.current = null;
-      // Final smooth scroll upon completion
       setTimeout(() => scrollToBottom(false), 50);
     }
   };
@@ -520,11 +584,13 @@ export default function ChatAssistantPage() {
     }
   }, [messages]);
 
+  const activeDescriptor = getModelDescriptor(model);
+
   const promptStarters = [
-    'Draft a Q4 enterprise expansion strategy',
+    'What is JavaScript?',
+    'Build an enterprise business strategy',
+    'Generate 5 high-converting cold email hooks',
     'Review key risks in standard SaaS SLA agreements',
-    'Generate 5 high-converting B2B cold email hooks',
-    'Analyze strategies to reduce client churn by 15%',
   ];
 
   return (
@@ -574,31 +640,59 @@ export default function ChatAssistantPage() {
         </div>
 
         {/* Model Selector */}
-        <div className="pt-3 border-t border-slate-800">
-          <label className="text-[11px] font-medium text-slate-400 mb-1.5 flex items-center justify-between">
-            <span>Inference Model</span>
-            <span className="text-[10px] text-emerald-400 font-normal">Active</span>
-          </label>
+        <div className="pt-3 border-t border-slate-800 space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-[11px] font-medium text-slate-400">Inference Model</label>
+            <span className="text-[10px] text-blue-400 font-semibold">{activeDescriptor.badge}</span>
+          </div>
+
           <div className="relative">
             <select
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              className="w-full rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200 focus:border-blue-500 focus:outline-none appearance-none pr-7"
+              className="w-full rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-2 text-xs text-slate-200 focus:border-blue-500 focus:outline-none appearance-none pr-7"
             >
-              <option value="apexai-native-v2">⚡ ApexAI Native Model (Trained & Free)</option>
-              {isOpenAIReady ? (
-                <>
-                  <option value="gpt-4o-mini">OpenAI gpt-4o-mini (Connected)</option>
-                  <option value="gpt-4o">OpenAI gpt-4o (Deep Reasoning)</option>
-                  <option value="gpt-4-turbo">OpenAI gpt-4-turbo</option>
-                </>
-              ) : (
-                <option value="gpt-4o-mini" disabled>
-                  OpenAI (Key Required)
-                </option>
-              )}
+              <optgroup label="Autonomous Engine (Offline Ready)">
+                <option value="apexai-native-v2">⚡ ApexAI Native Model (Free)</option>
+              </optgroup>
+              <optgroup label="Google Gemini">
+                <option value="gemini-1.5-flash">Gemini 1.5 Flash (Ultra-Fast)</option>
+                <option value="gemini-1.5-pro">Gemini 1.5 Pro (Flagship Reasoning)</option>
+                <option value="gemini-2.0-flash">Gemini 2.0 Flash (Next-Gen)</option>
+              </optgroup>
+              <optgroup label="OpenRouter Free Models">
+                <option value="meta-llama/llama-3.3-70b-instruct:free">Llama 3.3 70B (Free)</option>
+                <option value="google/gemini-2.0-flash-exp:free">Gemini 2.0 Flash Exp (Free)</option>
+                <option value="mistralai/mistral-7b-instruct:free">Mistral 7B (Free)</option>
+                <option value="qwen/qwen-2.5-coder-32b-instruct:free">Qwen 2.5 Coder 32B (Free)</option>
+              </optgroup>
+              <optgroup label="OpenAI">
+                <option value="gpt-4o-mini">GPT-4o Mini</option>
+                <option value="gpt-4o">GPT-4o Omni (Deep Analysis)</option>
+              </optgroup>
             </select>
             <ChevronDown className="pointer-events-none absolute right-2.5 top-2.5 h-3.5 w-3.5 text-slate-500" />
+          </div>
+
+          {/* RAG Knowledge Attachment Toggle */}
+          <div className="pt-2 border-t border-slate-800/60">
+            <button
+              type="button"
+              onClick={() => setAttachKnowledge(!attachKnowledge)}
+              className={`w-full flex items-center justify-between rounded-lg p-2 text-xs border transition-colors ${
+                attachKnowledge
+                  ? 'border-blue-500/50 bg-blue-600/15 text-blue-300'
+                  : 'border-slate-800 bg-slate-950/60 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <BookOpen className="h-3.5 w-3.5" />
+                <span>Attach Knowledge</span>
+              </div>
+              <Badge variant={attachKnowledge ? 'info' : 'default'} className="text-[10px] py-0 px-1.5">
+                {attachKnowledge ? `${knowledgeDocCount} Docs` : 'Off'}
+              </Badge>
+            </button>
           </div>
         </div>
       </div>
@@ -613,13 +707,18 @@ export default function ChatAssistantPage() {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-sm font-semibold text-white">AI Business Assistant</h2>
-                <Badge variant="success" className="text-[10px] py-0 px-1.5">
-                  {model === 'apexai-native-v2' ? 'Native Model' : 'OpenAI'}
+                <h2 className="text-sm font-semibold text-white">{activeDescriptor.name}</h2>
+                <Badge variant="info" className="text-[10px] py-0 px-1.5">
+                  {activeDescriptor.providerName}
                 </Badge>
+                {attachKnowledge && (
+                  <Badge variant="success" className="text-[10px] py-0 px-1.5">
+                    RAG Grounded
+                  </Badge>
+                )}
               </div>
               <p className="text-[10px] text-slate-400">
-                100% Autonomous • Live Real-Time Token Streaming
+                {activeDescriptor.description}
               </p>
             </div>
           </div>
@@ -673,6 +772,7 @@ export default function ChatAssistantPage() {
               copiedId={copiedId}
               onCopy={handleCopy}
               onRegenerate={handleRegenerate}
+              onEdit={message.role === 'user' ? handleEditPrompt : undefined}
             />
           ))}
 
@@ -687,11 +787,12 @@ export default function ChatAssistantPage() {
                   <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-bounce" />
                   <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-bounce [animation-delay:0.2s]" />
                   <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-bounce [animation-delay:0.4s]" />
-                  <span className="ml-2 font-medium text-slate-300">Synthesizing executive response...</span>
+                  <span className="ml-2 font-medium text-slate-300">
+                    Generating response via {activeDescriptor.name}...
+                  </span>
                 </div>
               </div>
 
-              {/* Instant Abort / Cancel Button */}
               <button
                 type="button"
                 onClick={handleStopGeneration}
@@ -753,7 +854,7 @@ export default function ChatAssistantPage() {
                   sendMessage(input);
                 }
               }}
-              placeholder="Ask anything about business strategy, workflows, market analysis, or operations... (Shift+Enter for newline)"
+              placeholder={`Message ${activeDescriptor.name}... (Shift+Enter for newline)`}
               className="flex-1 max-h-36 min-h-[44px] resize-none rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
 
@@ -810,6 +911,32 @@ export default function ChatAssistantPage() {
               >
                 Confirm Reset
               </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Daily Usage Limit Modal */}
+      {limitModalOpen && (
+        <Modal
+          isOpen={limitModalOpen}
+          onClose={() => setLimitModalOpen(false)}
+          title="Daily Message Quota Reached"
+          description="You have reached your daily message allowance for the Free tier."
+        >
+          <div className="space-y-4">
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Your free quota resets at 00:00 UTC. To unlock 250 daily messages, flagship models (GPT-4o, Gemini 1.5 Pro), and AI Video Studio credits, upgrade to <strong>Pro</strong>.
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+              <Button variant="ghost" size="sm" onClick={() => setLimitModalOpen(false)}>
+                Maybe Later
+              </Button>
+              <Link href="/pricing">
+                <Button variant="primary" size="sm" rightIcon={<Crown className="h-3.5 w-3.5" />}>
+                  View Pro Plans
+                </Button>
+              </Link>
             </div>
           </div>
         </Modal>

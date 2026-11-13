@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { isAIConfigured, isOpenAIConfigured, getDefaultModel, getActiveProvider } from '@/lib/ai/client';
 import { isSupabaseConfigured } from '@/lib/supabase/client';
 import { getTuningConfig, getTrainingDataset } from '@/lib/ai/native-engine';
+import { getProviderStatus, SUPPORTED_MODELS } from '@/lib/ai/providers';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -11,6 +12,7 @@ export async function GET() {
   const tuning = getTuningConfig();
   const dataset = getTrainingDataset();
   const dbReady = isSupabaseConfigured();
+  const providersStatus = getProviderStatus();
 
   return NextResponse.json({
     ai: {
@@ -18,6 +20,8 @@ export async function GET() {
       provider: provider === 'openai' ? 'OpenAI Official API' : provider === 'custom-free' ? 'Custom Provider' : 'Native Trained Model',
       model: getDefaultModel(),
       isOpenAIConfigured: isOpenAIConfigured(),
+      providers: providersStatus,
+      supportedModels: SUPPORTED_MODELS,
       training: {
         modelName: tuning.modelName,
         version: tuning.version,

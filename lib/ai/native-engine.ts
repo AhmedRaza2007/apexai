@@ -91,7 +91,7 @@ export function removeTrainingExample(id: string): void {
 }
 
 // ----------------------------------------------------------------------------
-// Generative Inference Pipeline (Synthesizes prompt + knowledge base + heuristics)
+// Generative Inference Pipeline with Intent Detection & Contextual Memory
 // ----------------------------------------------------------------------------
 
 export async function runNativeInference(
@@ -99,7 +99,8 @@ export async function runNativeInference(
   modelName: string = 'ApexAI Native Enterprise Model'
 ): Promise<string> {
   const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')?.content || '';
-  const query = lastUserMsg.toLowerCase();
+  const trimmed = lastUserMsg.trim();
+  const query = trimmed.toLowerCase();
 
   // Search if any trained example matches closely
   for (const item of customTrainingDataset) {
@@ -108,38 +109,156 @@ export async function runNativeInference(
     }
   }
 
-  // 1. Email queries
+  // 1. Natural Conversational Greetings (e.g. "hi", "hello", "hey", "good morning")
+  const greetingRegex = /^(hi|hello|hey|heya|howdy|greetings|good\s+(morning|afternoon|evening|day)|hi\s+there|hello\s+there)[!.\s]*$/i;
+  if (greetingRegex.test(trimmed)) {
+    return "Hello! How can I help you today?";
+  }
+
+  // 2. Casual Conversational Queries (e.g. "how are you?", "who are you?")
+  if (/^how\s+are\s+you(\s+doing)?\??$/i.test(trimmed) || query.includes("how are you")) {
+    return "I'm doing well, thank you! How can I help you today?";
+  }
+
+  if (query.includes("who are you") || query.includes("what are you") || query === "who made you") {
+    return "I am **ApexAI**, an intelligent, multi-model AI assistant designed to help you with business strategy, communications, coding, research, data synthesis, and creative workflows. How can I assist you right now?";
+  }
+
+  if (/^(thanks|thank\s+you|thx|appreciate\s+it)[!.\s]*$/i.test(trimmed)) {
+    return "You're very welcome! Feel free to ask if there is anything else you need.";
+  }
+
+  // 3. Technical & Programming Queries (e.g. "what is javascript?", "what is typescript?", "python example")
+  if (query.includes("what is javascript") || query.includes("explain javascript")) {
+    return `**JavaScript (JS)** is a lightweight, interpreted, object-oriented programming language with first-class functions, best known as the scripting language for web pages.
+
+### Key Characteristics
+- **Dynamic Typing**: Variables do not require strict type definitions at declaration.
+- **Event-Driven & Asynchronous**: Utilizes an event loop with non-blocking I/O (Promises and \`async/await\`).
+- **Universal Runtime**: Runs natively in all modern web browsers and on the server via Node.js, Deno, and Bun.
+
+### Quick Example
+\`\`\`javascript
+// Asynchronous data fetch example
+async function fetchExecutiveSummary(reportId) {
+  try {
+    const response = await fetch(\`/api/reports/\${reportId}\`);
+    if (!response.ok) {
+      throw new Error(\`HTTP error! status: \${response.status}\`);
+    }
+    const data = await response.json();
+    console.log("Summary:", data.title);
+    return data;
+  } catch (error) {
+    console.error("Failed to load report:", error.message);
+  }
+}
+\`\`\`
+
+Would you like to explore JavaScript concepts in greater depth, such as closures, modern ESNext features, or TypeScript integration?`;
+  }
+
+  if (query.includes("what is typescript") || query.includes("explain typescript")) {
+    return `**TypeScript** is a strongly typed, open-source programming language developed by Microsoft that builds on JavaScript by adding static type definitions.
+
+### Why Teams Use TypeScript
+- **Compile-Time Safety**: Catches type mismatches and null reference bugs during development rather than in production.
+- **Self-Documenting Code**: Interfaces and types clarify contracts between components and APIs.
+- **Enterprise Tooling**: Enables intelligent IDE autocomplete, refactoring, and code navigation.
+
+### Quick Example
+\`\`\`typescript
+interface UserProfile {
+  id: string;
+  name: string;
+  role: 'admin' | 'member' | 'guest';
+  emailVerified: boolean;
+}
+
+function formatUserGreeting(user: UserProfile): string {
+  return \`Welcome \${user.name} (\${user.role.toUpperCase()})\`;
+}
+\`\`\``;
+  }
+
+  if (query.includes("what is python") || query.includes("explain python")) {
+    return `**Python** is a high-level, general-purpose programming language renowned for its clean syntax, readability, and vast ecosystem. It is the dominant language in data science, machine learning, AI engineering, automation, and backend web development.
+
+### Core Strengths
+- **Readable Syntax**: Uses indentation rather than curly braces, making code concise and accessible.
+- **Extensive Standard Library**: "Batteries included" philosophy for networking, mathematics, file manipulation, and threading.
+- **AI & Data Ecosystem**: Powers leading frameworks including PyTorch, TensorFlow, Pandas, NumPy, and FastAPI.
+
+### Quick Example
+\`\`\`python
+# Simple automated data summary script
+def summarize_sales(transactions: list[dict]) -> dict:
+    total_revenue = sum(item["amount"] for item in transactions)
+    average_order = total_revenue / len(transactions) if transactions else 0.0
+    return {
+        "count": len(transactions),
+        "total_revenue": round(total_revenue, 2),
+        "average_order": round(average_order, 2)
+    }
+\`\`\``;
+  }
+
+  // 4. Contextual Follow-up Detection (e.g. "tell me more", "explain that", "give me an example")
+  if (query.includes("tell me more") || query.includes("elaborate") || query.includes("can you explain that") || query === "more") {
+    // Check previous assistant message to provide a tailored continuation
+    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')?.content || '';
+    if (lastAssistant) {
+      const topicSnippet = lastAssistant.slice(0, 80).replace(/[#*`\n]/g, ' ').trim();
+      return `Certainly! Continuing from our discussion regarding "${topicSnippet}...":\n\nHere are the critical next-level considerations to keep in mind:\n\n1. **Implementation Architecture**: Structure the phased rollout into small, testable sprints with clear milestone verification.\n2. **Measurement & Telemetry**: Track quantitative leading indicators (latency, conversion rate, defect density) rather than just lagging outputs.\n3. **Risk Mitigation**: Build rollback strategies and maintain human-in-the-loop checkpoints during key inflection points.\n\nWhich specific area would you like to drill into next?`;
+    }
+  }
+
+  // 5. Email queries
   if (query.includes('email') || query.includes('subject') || query.includes('prospect') || query.includes('outreach')) {
     return generateExecutiveEmail(lastUserMsg);
   }
 
-  // 2. Social media queries
+  // 6. Social media queries
   if (query.includes('social') || query.includes('linkedin') || query.includes('twitter') || query.includes('post') || query.includes('caption')) {
     return generateSocialPost(lastUserMsg);
   }
 
-  // 3. Product copy queries
+  // 7. Product copy queries
   if (query.includes('product') || query.includes('copy') || query.includes('landing') || query.includes('feature')) {
     return generateProductCopy(lastUserMsg);
   }
 
-  // 4. Summarize queries
+  // 8. Summarize queries
   if (query.includes('summar') || query.includes('brief') || query.includes('extract') || query.includes('memo')) {
     return generateExecutiveSummary(lastUserMsg);
   }
 
-  // 5. Strategy and brainstorming queries
-  if (query.includes('strategy') || query.includes('brainstorm') || query.includes('growth') || query.includes('market') || query.includes('business idea')) {
+  // 9. Strategy and brainstorming queries
+  if (query.includes('strategy') || query.includes('brainstorm') || query.includes('growth') || query.includes('market') || query.includes('business idea') || query.includes('build a business')) {
     return generateStrategyPlan(lastUserMsg);
   }
 
-  // 6. Risk, SLA, and compliance queries
+  // 10. Risk, SLA, and compliance queries
   if (query.includes('risk') || query.includes('sla') || query.includes('agreement') || query.includes('contract') || query.includes('compliance')) {
     return generateRiskAssessment(lastUserMsg);
   }
 
-  // General executive business synthesis
-  return generateGeneralBusinessResponse(lastUserMsg);
+  // 11. General conversational response
+  return generateGeneralConversationalResponse(lastUserMsg);
+}
+
+function generateGeneralConversationalResponse(prompt: string): string {
+  return `Thank you for sharing that question!
+
+Here is a clear, direct perspective on **${prompt.slice(0, 60)}**:
+
+1. **Core Understanding**: Breaking down the key elements reveals that success depends primarily on focused execution, clear criteria, and consistent measurement.
+2. **Actionable Recommendations**:
+   - Define your intended outcome with measurable benchmarks.
+   - Test initial hypotheses with a lightweight pilot before committing full resources.
+   - Iterate based on real feedback and metrics.
+
+Please feel free to ask follow-up questions or let me know if you would like code examples, a step-by-step framework, or a deeper exploration of this topic!`;
 }
 
 function generateRiskAssessment(prompt: string): string {
@@ -169,58 +288,73 @@ Below is a structured analysis of standard Service Level Agreement (SLA) risks a
 }
 
 function generateExecutiveEmail(prompt: string): string {
+  const recipientMatch = prompt.match(/Recipient:\s*([^\n]+)/i);
+  const purposeMatch = prompt.match(/(?:Core Objective|Purpose):\s*([^\n]+)/i);
+  const senderMatch = prompt.match(/Sender Identity:\s*([^\n]+)/i);
+  const keyPointsMatch = prompt.match(/Key Points[^:]*:\s*([\s\S]*?)(?=(?:Deliver multiple|$))/i);
+  const toneMatch = prompt.match(/Desired Tone:\s*([^\n]+)/i);
+
+  const recipient = recipientMatch ? recipientMatch[1].trim() : 'Esteemed Colleague';
+  const purpose = purposeMatch ? purposeMatch[1].trim() : 'Strategic Partnership & Follow-up';
+  const sender = senderMatch ? senderMatch[1].trim() : 'Alex Morgan | Strategic Operations';
+  const rawKeyPoints = keyPointsMatch ? keyPointsMatch[1].trim() : prompt.slice(0, 150);
+  const tone = toneMatch ? toneMatch[1].trim() : 'professional';
+
   return `### Recommended Subject Line Options
-- **Direct**: Next Steps: Accelerating Workflow Automation with ApexAI
-- **Curiosity**: Quick question regarding your team's Q4 operational priorities
-- **Value-Driven**: How to compress reporting overhead by over 40%
+- **Direct**: Next Steps: ${purpose}
+- **Value-Driven**: Action Items & Milestone Update on ${purpose}
+- **Curiosity-Based**: Quick perspective regarding our upcoming timeline
 
 ---
 
-### Email Draft
-Dear Colleague,
+### Email Draft (${tone.toUpperCase()} TONE)
+Dear ${recipient},
 
-I hope your week is off to a productive start.
+I hope this message finds you well.
 
-Following up on our recent conversation regarding scaling team output and eliminating manual overhead, I wanted to share a concrete framework our partners use to streamline operational bottlenecks.
+I am writing regarding **${purpose}**. To ensure complete alignment and maintain strong execution momentum, here is a concise briefing on the critical milestones and requirements:
 
-Specifically, by standardizing repetitive documentation and integrating intelligent triage workflows, teams are realizing:
-- **40% reduction** in manual drafting and reporting cycles
-- **Sub-15 minute response times** for enterprise inquiries
-- Direct synchronization with your existing database and compliance records
+${rawKeyPoints.split('\n').filter(Boolean).map(line => line.startsWith('-') || line.startsWith('*') ? line : `- **${line.trim()}**`).join('\n')}
 
-Would you have 15 minutes next Tuesday at 2:00 PM EST or Wednesday at 10:00 AM EST for a high-level briefing tailored to your team's roadmap?
+Based on our target roadmap, would you have 15 minutes this week for a brief touchpoint to finalize next steps? Please let me know what day and time works best for your schedule.
 
 Warm regards,  
-**Alex Morgan**  
-Head of Strategic Operations | ApexAI Suite
+**${sender}**
 
 ---
 
-### Strategic Delivery Advice
-- **Optimal Sending Window**: Tuesday through Thursday, between 9:30 AM and 11:00 AM recipient local time.
-- **Follow-up Cadence**: If no response is received within 3 business days, dispatch a concise, value-add follow-up referencing one relevant case study metric.`;
+### Strategic Delivery Guidance
+- **Optimal Sending Cadence**: Dispatch between Tuesday and Thursday morning for maximum executive open rates.
+- **Follow-up Protocol**: If no response is received within 3 business days, send a polite 1-paragraph reminder referencing the primary action item.`;
 }
 
 function generateSocialPost(prompt: string): string {
-  return `### Captivating Hook Options
-- **Option 1**: Most business leaders think AI replaces jobs. High-performing teams know it actually eliminates drudgery.
-- **Option 2**: In 2026, the companies scaling ARR fastest aren't hiring double the headcount—they're upgrading their operational leverage.
+  const platformMatch = prompt.match(/Target Platform:\s*([^\n]+)/i);
+  const topicMatch = prompt.match(/(?:Core Topic|Topic):\s*([^\n]+)/i);
+  const audienceMatch = prompt.match(/Target Audience:\s*([^\n]+)/i);
+  const ctaMatch = prompt.match(/Call-to-Action:\s*([^\n]+)/i);
+
+  const platform = platformMatch ? platformMatch[1].trim() : 'LinkedIn';
+  const topic = topicMatch ? topicMatch[1].trim() : 'Business Innovation & Operational Leverage';
+  const audience = audienceMatch ? audienceMatch[1].trim() : 'Business Leaders and Operators';
+  const cta = ctaMatch ? ctaMatch[1].trim() : 'What is your perspective? Let us know in the comments below.';
+
+  return `### Captivating Hook Options (${platform.toUpperCase()})
+- **Hook 1**: Most leaders view **${topic}** as a checklist item. Top 1% operators treat it as their unfair competitive advantage.
+- **Hook 2**: If you want to scale output without linearly scaling overhead, mastering **${topic}** is non-negotiable.
 
 ---
 
 ### Primary Post Copy
-Here is the uncomfortable truth about modern business productivity:
+Here is the core lesson regarding **${topic}** for ${audience}:
 
-Most professionals spend **60% of their day** on administrative choreography:
-• Re-writing follow-up emails
-• Sifting through 20-page meeting transcripts
-• Formatting marketing captions across 4 different platforms
-• Manually assembling status reports
+When teams get bogged down by administrative choreography, high-leverage execution stalls.
 
-When you give every team member an intelligent copilot:
-1. **Focus shifts back to strategic judgment and client empathy.**
-2. **Cycle times drop from hours to seconds.**
-3. **High-stakes deliverables get standardized and verified.**
+Here is the 3-part framework high-growth organizations use to break through:
+
+1. **Standardize the baseline**: Document repeatable workflows before attempting to automate them.
+2. **Deploy intelligent copilots**: Let AI synthesize raw data, triage requests, and draft first passes.
+3. **Keep human judgment in the loop**: Focus executive energy on high-stakes strategy and client relationships.
 
 The goal isn't artificial intelligence for the sake of novelty.  
 The goal is **freeing human intelligence for strategic leverage.**
@@ -228,100 +362,123 @@ The goal is **freeing human intelligence for strategic leverage.**
 ---
 
 ### Call-to-Action (CTA)
-How is your organization approaching daily workflow automation this quarter? Drop your perspective in the comments below. 👇
+${cta}
 
 ---
 
 ### Recommended Hashtags
-#AI #BusinessOperations #FutureOfWork #Productivity #Leadership #B2BGrowth #ExecutiveStrategy`;
+#${topic.replace(/[^\w]/g, '') || 'BusinessStrategy'} #Leadership #Productivity #AIInnovation #FutureOfWork #Operations`;
 }
 
 function generateProductCopy(prompt: string): string {
+  const nameMatch = prompt.match(/Product Name:\s*([^\n]+)/i);
+  const audienceMatch = prompt.match(/Target Audience:\s*([^\n]+)/i);
+  const featuresMatch = prompt.match(/Technical Specifications[^:]*:\s*([\s\S]*?)(?=(?:Translate technical|$))/i);
+  const toneMatch = prompt.match(/Brand Voice[^:]*:\s*([^\n]+)/i);
+
+  const productName = nameMatch ? nameMatch[1].trim() : 'ApexAI Enterprise Suite';
+  const audience = audienceMatch ? audienceMatch[1].trim() : 'Modern Founders & High-Growth Teams';
+  const rawFeatures = featuresMatch ? featuresMatch[1].trim() : 'Automated workflows, AI copilot, bank-grade encryption';
+  const tone = toneMatch ? toneMatch[1].trim() : 'premium and innovative';
+
   return `### Headline & Tagline
-**ApexAI Business Suite: The Modern AI Operating System for High-Growth Enterprises**  
-*Automate routine business chores, synthesize critical intelligence, and scale operational capacity with bank-grade security.*
+**${productName}: The Intelligent Operating System for ${audience}**  
+*Accelerate execution, eliminate operational drag, and scale output with ${tone} precision.*
 
 ---
 
-### Narrative Overview
-In today’s hyper-competitive landscape, speed is the ultimate competitive moat. Yet high-performing teams remain bogged down by hours of repetitive communications, manual document synthesis, and fragmented SaaS tools.
+### Narrative Product Overview
+In today’s fast-moving market, speed and precision define market winners. Yet high-performing teams spend hours every week managing fragmented tools and repetitive manual documentation.
 
-The ApexAI Business Suite combines an executive-level conversational assistant, specialized business prompt generators, and human-in-the-loop task automations into one unified, enterprise-grade command center.
-
----
-
-### Core Value Pillars & Key Features
-- **⚡ Executive Communications Engine**: Generate pitch-perfect client proposals, investor updates, and negotiation emails tailored to any brand voice in seconds.
-- **📊 Instant Intelligence Synthesis**: Condense 50-page reports, contracts, and meeting minutes into actionable 1-sentence summaries and ownership matrices.
-- **🔒 Multi-Tenant Data Isolation**: Engineered with PostgreSQL Row Level Security (RLS) ensuring your proprietary business data remains 100% private to your workspace.
-- **🛡️ Human-in-the-Loop Safeguards**: Consequential external operations require interactive verification before dispatch, preventing unauthorized actions.
+**${productName}** unifies conversational intelligence, high-converting copy generation, and human-in-the-loop task automations into one command center.
 
 ---
 
-### Target Audience
-Built specifically for founders, Operations Directors, C-level executives, and forward-thinking enterprises seeking maximum leverage without ballooning headcount.
+### Core Value Pillars & Customer Benefits
+${rawFeatures.split('\n').filter(Boolean).map(feat => `- **${feat.replace(/^[-*]\s*/, '').trim()}**: Engineered to cut cycle times by over 40% while preserving absolute compliance and brand tone.`).join('\n')}
 
 ---
 
-### Call to Action (CTA)
-**[Launch Your Free Workspace]** — Experience instant enterprise leverage today.`;
+### Target Audience Persona
+Built exclusively for **${audience}** who demand enterprise reliability, data privacy, and measurable return on investment.
+
+---
+
+### Conversion Call to Action (CTA)
+**[Get Started with ${productName}]** — Experience modern operational leverage today.`;
 }
 
 function generateExecutiveSummary(prompt: string): string {
+  const sourceMatch = prompt.match(/=== SOURCE CONTENT START ===\s*([\s\S]*?)\s*=== SOURCE CONTENT END ===/i);
+  const sourceText = sourceMatch ? sourceMatch[1].trim() : prompt;
+  const snippet = sourceText.slice(0, 300).replace(/\n/g, ' ');
+
   return `### 1-Sentence Executive Summary
-The analyzed business document establishes that operational bottlenecks can be resolved through structured workflow standardization, reducing overhead costs by up to 35% while improving team responsiveness.
+The analyzed document outlines strategic operational priorities, demonstrating that workflow standardization and intelligent triage eliminate bottleneck friction and improve delivery velocity.
 
 ---
 
 ### Key Takeaways & Strategic Insights
-1. **Operational Capacity**: High friction in manual documentation currently accounts for over 12 hours of wasted weekly executive bandwidth.
-2. **Technology Modernization**: Migrating fragmented spreadsheets to partitioned databases and AI copilots provides immediate ROI within 60 days.
-3. **Risk Management**: Enforcing human confirmation gates eliminates compliance and brand exposure risks during automated workflows.
+1. **Operational Focus**: Analysis confirms key dependencies centered around: "${snippet.slice(0, 120)}..."
+2. **Resource Efficiency**: Standardizing documentation cycles reduces executive overhead by up to 35%.
+3. **Execution Guardrails**: Establishing structured verification gates prevents compliance exposure during scaled workflows.
 
 ---
 
 ### Action Items & Ownership Matrix
 | Strategic Action Item | Priority | Recommended Owner | Target Milestone |
 | :--- | :--- | :--- | :--- |
-| Finalize AI prompt standardization for customer communications | High | VP of Customer Experience | Week 2 |
-| Verify PostgreSQL Row-Level Security policies | Critical | Lead DevOps / SecOps | Immediate |
-| Establish weekly leadership briefing synthesis pipeline | Medium | Chief of Staff | Week 3 |
+| Finalize process requirements and verification criteria | High | VP of Operations | Sprint 1 |
+| Validate data security and multi-tenant isolation | Critical | SecOps / Engineering | Immediate |
+| Deploy phased pilot cohort and measure throughput | Medium | Team Lead | Sprint 2 |
 
 ---
 
 ### Strategic Risks & Watch-outs
-- Ensure clear training for team members to review AI drafts prior to external distribution.
-- Maintain persistent database backups and monitor API rate limits during peak usage.`;
+- Maintain human-in-the-loop validation prior to external client delivery.
+- Continuously monitor rate limits and audit logs during high-volume operations.`;
 }
 
 function generateStrategyPlan(prompt: string): string {
-  return `### Executive Strategy Blueprint
+  const challengeMatch = prompt.match(/Strategic Challenge:\s*([^\n]+)/i);
+  const industryMatch = prompt.match(/Industry[^:]*:\s*([^\n]+)/i);
+  const goalMatch = prompt.match(/Primary Success KPI:\s*([^\n]+)/i);
 
-#### Initiative 1: High-Velocity Inbound Pipeline & Value Engineering
-- **Concept**: Deploy specialized AI calculators and automated mini-audits on your landing page to convert passive visitors into qualified leads.
-- **Value Proposition**: Prospects receive immediate, personalized operational benchmarks in exchange for work contact information.
-- **Execution Timeline**: 3-week sprint (Design audit criteria, configure API automation, launch A/B test).
+  const challenge = challengeMatch ? challengeMatch[1].trim() : 'Scaling Enterprise Market Expansion';
+  const industry = industryMatch ? industryMatch[1].trim() : 'Technology and B2B SaaS';
+  const goal = goalMatch ? goalMatch[1].trim() : 'Achieve 30% revenue expansion with sustainable unit economics';
 
-#### Initiative 2: Land-and-Expand Enterprise Account Growth
-- **Concept**: Introduce tiered department adoption where initial success in Sales Operations automatically unlocks pilot licenses for Marketing and Customer Success.
-- **Value Proposition**: Lowers initial sales friction while creating natural internal virality across business units.
-- **Execution Timeline**: 60-day rollout with dedicated quarterly business review (QBR) milestones.
+  return `### Executive Strategy Blueprint: ${challenge}
+**Industry Sector**: ${industry}  
+**Primary Success KPI**: ${goal}
 
-#### Initiative 3: Strategic Ecosystem & Co-Marketing Partnerships
-- **Concept**: Partner with complementary B2B platforms to offer integrated bundles and co-branded executive webinars.
-- **Value Proposition**: Multiplies distribution reach without linear increases in customer acquisition cost (CAC).
-- **Execution Timeline**: Target 3 non-competitive technology partners within Q1.
+---
+
+#### Initiative 1: Value-Engineered Inbound & Interactive Audits
+- **Concept**: Deploy interactive assessment calculators and automated mini-audits addressing: **${challenge}**.
+- **Value Proposition**: Converts passive website visitors into high-intent inbound leads by delivering instant benchmark data.
+- **Execution Sprint**: 3-week sprint (Design assessment rubric, integrate API automation, launch A/B test).
+
+#### Initiative 2: Land-and-Expand Enterprise Account Trajectory
+- **Concept**: Structure modular department pilots where initial success in operations unlocks licenses for marketing and customer success.
+- **Value Proposition**: Minimizes initial sales friction while creating internal viral expansion across business units.
+- **Execution Sprint**: 60-day phased milestone review.
+
+#### Initiative 3: Strategic Ecosystem Distribution
+- **Concept**: Partner with complementary B2B platforms in the **${industry}** sector to co-sell bundled enterprise capabilities.
+- **Value Proposition**: Multiplies distribution surface area without linear increases in customer acquisition cost (CAC).
+- **Execution Sprint**: Identify and onboard 3 non-competing technology partners in Q1.
 
 ---
 
 ### Implementation & ROI Horizon
-| Pillar | Capital Required | Expected ROI Horizon | Primary Success KPI |
+| Strategic Pillar | Capital Required | Expected ROI Horizon | Primary Success Metric |
 | :--- | :--- | :--- | :--- |
 | Inbound Automation | Low ($2k - $5k) | 30 - 45 days | 25%+ increase in demo bookings |
 | Enterprise Expansion | Medium | 90 days | 30%+ increase in net revenue retention (NRR) |
-| Channel Partnerships | Low | 120 days | 40+ co-marketed enterprise accounts |
+| Channel Alliances | Low | 120 days | 40+ co-marketed enterprise accounts |
 
-> **Strategic Disclaimer**: *These growth concepts are structured frameworks generated by the ApexAI Native Model. Validate unit economics and customer willingness-to-pay via primary interviews prior to capital allocation.*`;
+> **Strategic Disclaimer**: *These strategic concepts are AI-generated frameworks intended for brainstorming. Prior to capital deployment, validate with primary customer interviews, regulatory compliance checks, and formal financial modeling.*`;
 }
 
 function generateGeneralBusinessResponse(prompt: string): string {

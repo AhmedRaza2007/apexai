@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
@@ -20,10 +20,15 @@ import {
   User,
   X,
   Cpu,
+  Film,
+  BookOpen,
+  CreditCard,
+  Crown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
 import { logoutLocalUser } from '@/lib/auth';
+import { getClientSubscription, SUBSCRIPTION_PLANS } from '@/lib/subscription';
 
 interface SidebarProps {
   userEmail?: string;
@@ -35,6 +40,11 @@ interface SidebarProps {
 export function Sidebar({ userEmail, userName, isOpen = true, onClose }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const [sub, setSub] = useState(getClientSubscription());
+
+  useEffect(() => {
+    setSub(getClientSubscription());
+  }, [pathname]);
 
   const handleSignOut = async () => {
     try {
@@ -55,6 +65,8 @@ export function Sidebar({ userEmail, userName, isOpen = true, onClose }: Sidebar
   const mainNavigation = [
     { name: 'Overview', href: '/dashboard', icon: LayoutDashboard },
     { name: 'AI Chat Assistant', href: '/chat', icon: MessageSquare },
+    { name: 'AI Video Studio', href: '/video', icon: Film, badge: 'New' },
+    { name: 'Knowledge Studio', href: '/knowledge', icon: BookOpen, badge: 'RAG' },
   ];
 
   const toolsNavigation = [
@@ -69,7 +81,11 @@ export function Sidebar({ userEmail, userName, isOpen = true, onClose }: Sidebar
     { name: 'Saved Library', href: '/library', icon: Bookmark },
     { name: 'Model Training Studio', href: '/train', icon: Cpu, badge: 'Native API' },
     { name: 'Automations', href: '/automations', icon: Zap, badge: 'Safeguarded' },
+    { name: 'Subscription & Usage', href: '/subscription', icon: CreditCard },
+    { name: 'Pricing Plans', href: '/pricing', icon: Crown },
   ];
+
+  const plan = SUBSCRIPTION_PLANS[sub.tier];
 
   return (
     <>
@@ -97,7 +113,7 @@ export function Sidebar({ userEmail, userName, isOpen = true, onClose }: Sidebar
             <div>
               <span className="text-base font-bold tracking-tight text-white">ApexAI</span>
               <span className="block text-[10px] font-medium text-blue-400 uppercase tracking-wider">
-                Business Suite
+                Enterprise AI Suite
               </span>
             </div>
           </Link>
@@ -115,7 +131,7 @@ export function Sidebar({ userEmail, userName, isOpen = true, onClose }: Sidebar
           {/* Main Core Links */}
           <div>
             <div className="px-3 pb-2 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
-              Workspace
+              AI Platform
             </div>
             <nav className="space-y-1">
               {mainNavigation.map((item) => {
@@ -127,14 +143,21 @@ export function Sidebar({ userEmail, userName, isOpen = true, onClose }: Sidebar
                     href={item.href}
                     onClick={() => onClose && onClose()}
                     className={cn(
-                      'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                      'flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors',
                       isActive
                         ? 'bg-blue-600/15 text-blue-400 border border-blue-500/30'
                         : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
                     )}
                   >
-                    <Icon className={cn('h-4 w-4', isActive ? 'text-blue-400' : 'text-slate-400')} />
-                    <span>{item.name}</span>
+                    <div className="flex items-center gap-3">
+                      <Icon className={cn('h-4 w-4', isActive ? 'text-blue-400' : 'text-slate-400')} />
+                      <span>{item.name}</span>
+                    </div>
+                    {item.badge && (
+                      <span className="rounded bg-purple-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-purple-300 border border-purple-500/30">
+                        {item.badge}
+                      </span>
+                    )}
                   </Link>
                 );
               })}
@@ -182,10 +205,10 @@ export function Sidebar({ userEmail, userName, isOpen = true, onClose }: Sidebar
             </nav>
           </div>
 
-          {/* Operations & Model Engine */}
+          {/* Operations & Subscription */}
           <div>
             <div className="px-3 pb-2 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
-              Operations & Engine
+              Operations & Billing
             </div>
             <nav className="space-y-1">
               {secondaryNavigation.map((item) => {
@@ -224,23 +247,41 @@ export function Sidebar({ userEmail, userName, isOpen = true, onClose }: Sidebar
           </div>
         </div>
 
-        {/* User Footer & Signout */}
-        <div className="border-t border-slate-800/80 p-4">
-          <div className="flex items-center justify-between rounded-xl bg-slate-900/80 p-2.5 border border-slate-800">
+        {/* User Footer & Plan Status */}
+        <div className="border-t border-slate-800/80 p-4 space-y-3">
+          {/* Active Plan Pill */}
+          <Link
+            href="/subscription"
+            className="flex items-center justify-between rounded-xl bg-slate-950/90 border border-slate-800/90 p-2.5 text-xs text-slate-300 hover:border-blue-500/40 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <Crown className="h-4 w-4 text-amber-400" />
+              <div>
+                <p className="font-semibold text-white leading-tight">{plan.name} Tier</p>
+                <p className="text-[10px] text-slate-400">
+                  {sub.tier === 'free' ? 'Upgrade to Pro' : `${sub.videoCreditsBalance} Video Credits`}
+                </p>
+              </div>
+            </div>
+            <span className="text-[10px] font-semibold text-blue-400">Manage</span>
+          </Link>
+
+          {/* User Signout Row */}
+          <div className="flex items-center justify-between rounded-xl bg-slate-900/80 p-2 border border-slate-800">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-600 text-xs font-semibold text-white">
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-600 text-xs font-semibold text-white">
                 {userName
                   ? userName.slice(0, 2).toUpperCase()
                   : userEmail
                   ? userEmail.slice(0, 2).toUpperCase()
-                  : <User className="h-4 w-4" />}
+                  : <User className="h-3.5 w-3.5" />}
               </div>
               <div className="min-w-0">
                 <p className="truncate text-xs font-medium text-white">
-                  {userName || userEmail || 'Guest Explorer'}
+                  {userName || userEmail || 'Apex Explorer'}
                 </p>
                 <p className="text-[10px] text-slate-400 truncate">
-                  {userEmail || 'Local Persistence Mode'}
+                  {userEmail || 'Active Workspace'}
                 </p>
               </div>
             </div>
@@ -248,7 +289,7 @@ export function Sidebar({ userEmail, userName, isOpen = true, onClose }: Sidebar
               onClick={handleSignOut}
               title={userEmail ? 'Sign Out' : 'Switch Account / Login'}
               aria-label="Account sign out or login"
-              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-red-400 transition-colors"
+              className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-red-400 transition-colors"
             >
               <LogOut className="h-4 w-4" />
             </button>
