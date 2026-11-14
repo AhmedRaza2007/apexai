@@ -655,6 +655,9 @@ export default function ChatAssistantPage() {
               <optgroup label="Autonomous Engine (Offline Ready)">
                 <option value="apexai-native-v2">⚡ ApexAI Native Model (Free)</option>
               </optgroup>
+              <optgroup label="Anthropic (US Flagship)">
+                <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet (Anthropic US)</option>
+              </optgroup>
               <optgroup label="Google Gemini">
                 <option value="gemini-1.5-flash">Gemini 1.5 Flash (Ultra-Fast)</option>
                 <option value="gemini-1.5-pro">Gemini 1.5 Pro (Flagship Reasoning)</option>

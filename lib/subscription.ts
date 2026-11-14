@@ -16,8 +16,9 @@ export interface PlanDefinition {
   tagline: string;
   priceMonthly: number;
   priceYearly: number; // billed annually
-  dailyMessageLimit: number; // e.g. 15, 250, 99999 (unlimited)
-  videoCreditsMonthly: number; // e.g. 0, 50, 200
+  dailyMessageLimit: number; // e.g. 15, 300, 99999 (unlimited)
+  videoCreditsMonthly: number; // e.g. 0, 60, 200
+  audioMinutesMonthly: number; // e.g. 0, 50, 250
   allowedModelTiers: Array<'free' | 'pro' | 'business'>;
   features: PlanFeature[];
   badge?: string;
@@ -28,11 +29,12 @@ export const SUBSCRIPTION_PLANS: Record<SubscriptionTier, PlanDefinition> = {
   free: {
     id: 'free',
     name: 'Free',
-    tagline: 'Core intelligence for casual users and explorers.',
+    tagline: 'Core intelligence for casual exploration.',
     priceMonthly: 0,
     priceYearly: 0,
     dailyMessageLimit: 15,
     videoCreditsMonthly: 0,
+    audioMinutesMonthly: 0,
     allowedModelTiers: ['free'],
     features: [
       { text: '15 AI messages per day', included: true },
@@ -40,52 +42,54 @@ export const SUBSCRIPTION_PLANS: Record<SubscriptionTier, PlanDefinition> = {
       { text: 'ApexAI Autonomous Native Engine', included: true },
       { text: 'Standard Business Tools (Email, Social, Copy)', included: true },
       { text: 'Local conversation history', included: true },
-      { text: 'AI Video Studio access & credits', included: false },
-      { text: 'Flagship GPT-4o & Gemini Pro models', included: false },
-      { text: 'Custom AI Knowledge Base & RAG', included: false },
+      { text: 'Executive Report Architect', included: false },
+      { text: 'AI Video Studio & Credits', included: false },
+      { text: 'Voice Synthesis & Whisper Audio Transcriber', included: false },
     ],
   },
   pro: {
     id: 'pro',
-    name: 'Pro',
-    tagline: 'Ideal for professionals, founders, and power creators.',
-    priceMonthly: 19,
-    priceYearly: 190, // ~16% discount
-    dailyMessageLimit: 250,
-    videoCreditsMonthly: 50,
+    name: 'Pro Executive',
+    tagline: 'Built for founders, executives, and power operators.',
+    priceMonthly: 29,
+    priceYearly: 290, // ~16% discount
+    dailyMessageLimit: 300,
+    videoCreditsMonthly: 60,
+    audioMinutesMonthly: 50,
     allowedModelTiers: ['free', 'pro'],
     popular: true,
     badge: 'Most Popular',
     features: [
-      { text: '250 AI messages per day', included: true, highlight: true },
-      { text: 'Flagship GPT-4o & Google Gemini 1.5 Pro', included: true },
-      { text: '50 Video Generation Credits / month', included: true, highlight: true },
-      { text: 'AI Video Studio (Text-to-Video & Image-to-Video)', included: true },
+      { text: '300 AI messages per day', included: true, highlight: true },
+      { text: 'Claude 3.5 Sonnet, GPT-4o & Gemini 1.5 Pro', included: true, highlight: true },
+      { text: 'Full Executive Report Architect (/reports)', included: true, highlight: true },
+      { text: '60 Video Studio Credits / month (720p HD)', included: true },
+      { text: '50 Minutes Audio Transcription & Voice Synthesis', included: true },
       { text: 'Custom AI Knowledge Studio & Document RAG', included: true },
-      { text: 'Priority low-latency inference', included: true },
-      { text: 'Cloud Supabase synchronization', included: true },
+      { text: 'Priority low-latency inference routing', included: true },
       { text: 'Dedicated team workspace', included: false },
     ],
   },
   business: {
     id: 'business',
-    name: 'Business',
-    tagline: 'Maximum leverage, unlimited bandwidth, and shared workspaces.',
-    priceMonthly: 49,
-    priceYearly: 490,
+    name: 'Business Team',
+    tagline: 'Maximum bandwidth, shared workspaces, and priority AI clusters.',
+    priceMonthly: 79,
+    priceYearly: 790,
     dailyMessageLimit: 9999, // effectively unlimited
     videoCreditsMonthly: 200,
+    audioMinutesMonthly: 250,
     allowedModelTiers: ['free', 'pro', 'business'],
     badge: 'Enterprise Grade',
     features: [
       { text: 'Unlimited daily AI messages', included: true, highlight: true },
-      { text: 'All AI models with dedicated high-concurrency routing', included: true },
-      { text: '200 Video Generation Credits / month', included: true, highlight: true },
-      { text: 'Full AI Video Studio with 1080p rendering', included: true },
-      { text: 'Enterprise Knowledge Studio (Unlimited document uploads)', included: true },
+      { text: 'All US AI models with dedicated concurrency cluster', included: true },
+      { text: '200 Video Studio Credits / month (1080p Full HD)', included: true, highlight: true },
+      { text: '250 Minutes Whisper Audio & Neural Voice Synthesis', included: true, highlight: true },
+      { text: 'Unlimited Document Knowledge Studio & Embeddings', included: true },
       { text: 'Team workspaces and shared prompt library', included: true },
       { text: 'Automations & custom workflow webhooks', included: true },
-      { text: '24/7 Priority SLA support', included: true },
+      { text: '24/7 Priority SLA support & dedicated manager', included: true },
     ],
   },
 };
@@ -102,6 +106,7 @@ export interface UserSubscriptionState {
   dailyMessagesUsed: number;
   lastUsageDate: string; // YYYY-MM-DD
   videoCreditsBalance: number;
+  audioMinutesBalance: number;
 }
 
 const STORAGE_KEY_SUBSCRIPTION = 'apexai_user_subscription';
@@ -173,6 +178,7 @@ export function createDefaultSubscription(userId: string): UserSubscriptionState
     dailyMessagesUsed: 0,
     lastUsageDate: now.toISOString().slice(0, 10),
     videoCreditsBalance: 0,
+    audioMinutesBalance: 0,
   };
 }
 

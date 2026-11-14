@@ -24,6 +24,7 @@ import {
   BookOpen,
   CreditCard,
   Crown,
+  Volume2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
@@ -65,7 +66,9 @@ export function Sidebar({ userEmail, userName, isOpen = true, onClose }: Sidebar
   const mainNavigation = [
     { name: 'Overview', href: '/dashboard', icon: LayoutDashboard },
     { name: 'AI Chat Assistant', href: '/chat', icon: MessageSquare },
-    { name: 'AI Video Studio', href: '/video', icon: Film, badge: 'New' },
+    { name: 'Executive Reports', href: '/reports', icon: FileText, badge: 'US AI' },
+    { name: 'Voice & Audio Studio', href: '/audio', icon: Volume2, badge: 'Whisper' },
+    { name: 'AI Video Studio', href: '/video', icon: Film, badge: 'Video' },
     { name: 'Knowledge Studio', href: '/knowledge', icon: BookOpen, badge: 'RAG' },
   ];
 

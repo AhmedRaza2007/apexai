@@ -1,11 +1,11 @@
 // ApexAI Multi-Model Provider Architecture
-// Seamlessly routes between Google Gemini, OpenRouter, OpenAI, and ApexAI Native Engine
+// Seamlessly routes between Anthropic Claude, OpenAI, Google Gemini, OpenRouter, and ApexAI Native Engine
 
 import OpenAI from 'openai';
 import { SYSTEM_PROMPTS } from './prompts';
 import { runNativeInference } from './native-engine';
 
-export type AIProvider = 'google' | 'openrouter' | 'openai' | 'native';
+export type AIProvider = 'anthropic' | 'openai' | 'google' | 'openrouter' | 'native';
 
 export interface ModelDescriptor {
   id: string;
@@ -33,14 +33,51 @@ export const SUPPORTED_MODELS: ModelDescriptor[] = [
     contextWindow: '32k',
   },
 
-  // 2. Google Gemini Models
+  // 2. Anthropic (US Flagship)
+  {
+    id: 'claude-3-5-sonnet-20241022',
+    name: 'Claude 3.5 Sonnet',
+    provider: 'anthropic',
+    providerName: 'Anthropic US',
+    description: 'Premier reasoning and coding intelligence developed in San Francisco, CA.',
+    badge: 'Anthropic US',
+    isFree: false,
+    tier: 'pro',
+    contextWindow: '200k',
+  },
+
+  // 3. OpenAI Models (US Flagship)
+  {
+    id: 'gpt-4o',
+    name: 'GPT-4o Omni',
+    provider: 'openai',
+    providerName: 'OpenAI US',
+    description: 'OpenAI’s flagship multi-modal model with advanced analytical capabilities.',
+    badge: 'OpenAI Flagship',
+    isFree: false,
+    tier: 'pro',
+    contextWindow: '128k',
+  },
+  {
+    id: 'gpt-4o-mini',
+    name: 'GPT-4o Mini',
+    provider: 'openai',
+    providerName: 'OpenAI US',
+    description: 'OpenAI’s high-speed compact model for quick conversational queries and utility execution.',
+    badge: 'OpenAI',
+    isFree: false,
+    tier: 'free',
+    contextWindow: '128k',
+  },
+
+  // 4. Google Gemini Models (US Flagship)
   {
     id: 'gemini-1.5-flash',
     name: 'Gemini 1.5 Flash',
     provider: 'google',
-    providerName: 'Google Gemini',
+    providerName: 'Google Cloud US',
     description: 'High-speed multimodal model with a 1-million token context window, perfect for everyday tasks.',
-    badge: 'Google',
+    badge: 'Google US',
     isFree: true,
     tier: 'free',
     contextWindow: '1M',
@@ -49,8 +86,8 @@ export const SUPPORTED_MODELS: ModelDescriptor[] = [
     id: 'gemini-1.5-pro',
     name: 'Gemini 1.5 Pro',
     provider: 'google',
-    providerName: 'Google Gemini',
-    description: 'Google’s flagship reasoning model for complex documents, long-context analysis, and coding.',
+    providerName: 'Google Cloud US',
+    description: 'Google’s flagship 2M-token reasoning model for complex documents and coding.',
     badge: 'Google Pro',
     isFree: false,
     tier: 'pro',
@@ -60,15 +97,15 @@ export const SUPPORTED_MODELS: ModelDescriptor[] = [
     id: 'gemini-2.0-flash',
     name: 'Gemini 2.0 Flash',
     provider: 'google',
-    providerName: 'Google Gemini',
-    description: 'Next-generation Gemini 2.0 architecture with real-time agentic speed.',
+    providerName: 'Google Cloud US',
+    description: 'Next-generation Gemini 2.0 architecture with real-time agentic response latency.',
     badge: 'Google Gen-2',
     isFree: true,
     tier: 'free',
     contextWindow: '1M',
   },
 
-  // 3. OpenRouter Free Models
+  // 5. OpenRouter Free Models
   {
     id: 'meta-llama/llama-3.3-70b-instruct:free',
     name: 'Llama 3.3 70B (Free)',
@@ -113,33 +150,14 @@ export const SUPPORTED_MODELS: ModelDescriptor[] = [
     tier: 'free',
     contextWindow: '32k',
   },
-
-  // 4. OpenAI Models
-  {
-    id: 'gpt-4o-mini',
-    name: 'GPT-4o Mini',
-    provider: 'openai',
-    providerName: 'OpenAI',
-    description: 'OpenAI’s compact, ultra-fast model for quick conversational queries and business utilities.',
-    badge: 'OpenAI',
-    isFree: false,
-    tier: 'free',
-    contextWindow: '128k',
-  },
-  {
-    id: 'gpt-4o',
-    name: 'GPT-4o Omni',
-    provider: 'openai',
-    providerName: 'OpenAI',
-    description: 'OpenAI’s premier multi-modal flagship model with advanced reasoning capabilities.',
-    badge: 'OpenAI Flagship',
-    isFree: false,
-    tier: 'pro',
-    contextWindow: '128k',
-  },
 ];
 
 // Helper to check valid configuration of individual API keys
+export function isAnthropicConfigured(): boolean {
+  const key = process.env.ANTHROPIC_API_KEY?.trim();
+  return Boolean(key && key.length > 10 && !key.includes('your-anthropic-key'));
+}
+
 export function isGeminiConfigured(): boolean {
   const key = process.env.GEMINI_API_KEY?.trim();
   return Boolean(key && key.length > 8 && !key.includes('your-gemini-api-key'));
@@ -157,9 +175,10 @@ export function isOpenAIConfigured(): boolean {
 
 export function getProviderStatus() {
   return {
+    anthropic: isAnthropicConfigured(),
+    openai: isOpenAIConfigured(),
     gemini: isGeminiConfigured(),
     openrouter: isOpenRouterConfigured(),
-    openai: isOpenAIConfigured(),
     native: true,
   };
 }
@@ -167,7 +186,6 @@ export function getProviderStatus() {
 export function getModelDescriptor(modelId: string): ModelDescriptor {
   const found = SUPPORTED_MODELS.find((m) => m.id === modelId);
   if (found) return found;
-  // If unrecognized, default to native
   return SUPPORTED_MODELS[0];
 }
 
@@ -189,14 +207,94 @@ export async function dispatchStreamInference(
   const encoder = new TextEncoder();
   const descriptor = getModelDescriptor(requestedModelId);
 
-  // 1. Google Gemini Provider
+  // 1. Anthropic Claude 3.5 Sonnet Provider (US)
+  if (descriptor.provider === 'anthropic' && isAnthropicConfigured()) {
+    try {
+      const apiKey = process.env.ANTHROPIC_API_KEY!.trim();
+      const anthropicMessages = messages
+        .filter((m) => m.role !== 'system')
+        .map((m) => ({ role: m.role, content: m.content }));
+
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        signal: abortSignal,
+        body: JSON.stringify({
+          model: descriptor.id,
+          max_tokens: 3500,
+          system: systemPrompt,
+          messages: anthropicMessages,
+          stream: true,
+        }),
+      });
+
+      if (res.ok && res.body) {
+        const streamReader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        const readable = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            try {
+              while (true) {
+                if (abortSignal?.aborted) {
+                  controller.close();
+                  return;
+                }
+                const { done, value } = await streamReader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                  const trimmed = line.trim();
+                  if (trimmed.startsWith('data: ')) {
+                    const jsonStr = trimmed.slice(6);
+                    try {
+                      const parsed = JSON.parse(jsonStr);
+                      if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+                        controller.enqueue(encoder.encode(parsed.delta.text));
+                      }
+                    } catch {}
+                  }
+                }
+              }
+              controller.close();
+            } catch (err) {
+              if (abortSignal?.aborted) {
+                try { controller.close(); } catch {}
+                return;
+              }
+              controller.error(err);
+            }
+          },
+        });
+
+        return {
+          readable,
+          modelUsed: descriptor.id,
+          providerUsed: 'anthropic',
+          fallbackTriggered: false,
+        };
+      }
+    } catch (anthropicErr) {
+      console.warn('Anthropic API call failed, falling through:', anthropicErr);
+    }
+  }
+
+  // 2. Google Gemini Provider (US)
   if (descriptor.provider === 'google' && isGeminiConfigured()) {
     try {
       const apiKey = process.env.GEMINI_API_KEY!.trim();
       const geminiModel = descriptor.id === 'gemini-2.0-flash' ? 'gemini-2.0-flash-exp' : descriptor.id;
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:streamGenerateContent?alt=sse&key=${apiKey}`;
 
-      // Convert messages to Gemini format
       const contents = messages
         .filter((m) => m.role !== 'system')
         .map((m) => ({
@@ -249,9 +347,7 @@ export async function dispatchStreamInference(
                       if (chunkText) {
                         controller.enqueue(encoder.encode(chunkText));
                       }
-                    } catch {
-                      // Skip non-json SSE lines
-                    }
+                    } catch {}
                   }
                 }
               }
@@ -278,7 +374,7 @@ export async function dispatchStreamInference(
     }
   }
 
-  // 2. OpenRouter Provider (Free & Paid Models)
+  // 3. OpenRouter Provider (Free & Open Source)
   if (descriptor.provider === 'openrouter' && isOpenRouterConfigured()) {
     try {
       const apiKey = process.env.OPENROUTER_API_KEY!.trim();
@@ -339,7 +435,7 @@ export async function dispatchStreamInference(
     }
   }
 
-  // 3. OpenAI Provider
+  // 4. OpenAI Provider (US)
   if (descriptor.provider === 'openai' && isOpenAIConfigured()) {
     try {
       const apiKey = process.env.OPENAI_API_KEY!.trim();
@@ -396,10 +492,9 @@ export async function dispatchStreamInference(
     }
   }
 
-  // 4. Autonomous Native Engine (Zero external dependencies, guaranteed response)
+  // 5. Autonomous Native Engine (Zero external dependencies, guaranteed response)
   const nativeOutput = await runNativeInference(messages, descriptor.id);
 
-  // Group tokens into smooth phrase chunks (2-3 words per chunk)
   const rawTokens = nativeOutput.split(/(\s+)/);
   const chunks: string[] = [];
   let currentChunk = '';
